@@ -189,10 +189,62 @@ def match_for(c,team,r):
 
 def target_round(c): return current_round(c)+1 if setting(c,'phase')=='matching' else current_round(c)
 
+def ranking_key(team):
+    return team['points']
+
+def final_tie(c):
+    """A tied cumulative match score at the final cutoff needs an explicit decision."""
+    ranked=standings(c)
+    if len(ranked)<3: return {'required':False,'candidates':[],'chosen':None}
+    cutoff=ranking_key(ranked[1])
+    required=ranking_key(ranked[0])==cutoff or ranking_key(ranked[2])==cutoff
+    candidates=[{'id':t['id'],'name':t['name'],'points':t['points'],'wins':t['wins'],'solved':t['solved']}
+                for t in ranked if ranking_key(t)>=cutoff] if required else []
+    a,b=setting(c,'final_a'),setting(c,'final_b')
+    chosen=[int(a),int(b)] if a and b else None
+    return {'required':required,'candidates':candidates,'chosen':chosen,
+            'locked_first':ranked[0]['id'] if ranking_key(ranked[0])>cutoff else None}
+
 def ensure_final(c):
     if current_round(c)==5 and not c.execute('SELECT 1 FROM matches WHERE round=6').fetchone():
-        top=standings(c)[:2]
-        c.execute('INSERT INTO matches(round,team_a,team_b,problem_set) VALUES (6,?,?,6)',(top[0]['id'],top[1]['id']))
+        tie=final_tie(c)
+        if tie['required'] and not tie['chosen']:
+            raise ValueError('동점 팀이 있습니다. 운영자가 결승 진출 두 팀을 먼저 선택하세요.')
+        top=tie['chosen'] if tie['required'] else [t['id'] for t in standings(c)[:2]]
+        c.execute('INSERT INTO matches(round,team_a,team_b,problem_set) VALUES (6,?,?,6)',(*top,))
+
+def rehearsal(c): return setting(c,'rehearsal','0')=='1'
+
+def simulate_result(c,match_id,team_id,level,verdict):
+    if not rehearsal(c) or setting(c,'phase')!='live': raise ValueError('진행 중인 리허설 경기에서만 사용할 수 있습니다.')
+    m=c.execute("SELECT * FROM matches WHERE id=? AND round=? AND status='open'",(match_id,current_round(c))).fetchone()
+    if not m or team_id not in (m['team_a'],m['team_b']) or type(level) is not int or level not in range(1,6):
+        raise ValueError('경기·팀·레벨을 확인하세요.')
+    if verdict not in ('correct','wrong'):raise ValueError('리허설 판정 종류를 확인하세요.')
+    row=c.execute('SELECT u.* FROM users u JOIN round_assignments a ON a.user_id=u.id WHERE a.round=? AND a.team_id=? AND a.level=?',(m['round'],team_id,level)).fetchone()
+    if not row:raise ValueError('담당 선수가 배정되지 않았습니다.')
+    uid=row['id']; p=problem_for(m,team_id,level)
+    if (epoch(c),m['id'],uid) in SUBMITTING:raise ValueError('해당 선수의 실제 채점이 진행 중입니다.')
+    if c.execute('SELECT 1 FROM solves WHERE match_id=? AND user_id=?',(m['id'],uid)).fetchone():raise ValueError('이미 정답 처리한 선수입니다.')
+    if verdict=='correct' and m['round']==6 and level==5 and not c.execute("SELECT 1 FROM solves WHERE match_id=? AND team_id=? AND problem_id LIKE '%-L4'",(m['id'],team_id)).fetchone():
+        raise ValueError('결승 Lv5는 같은 팀 Lv4를 먼저 정답 처리해야 합니다.')
+    now=time.time()
+    if verdict=='wrong':
+        c.execute('INSERT INTO submissions(match_id,user_id,problem_id,at,verdict,passed,total,code) VALUES (?,?,?,?,?,?,?,?)',
+                  (m['id'],uid,p['id'],now,'오답',0,len(judge_inputs(p)),'# 운영자 리허설 오답 · 실제 제출 코드 아님'))
+        c.execute('UPDATE drafts SET cooldown_until=? WHERE match_id=? AND user_id=?',(now+10,m['id'],uid))
+        event(c,m['id'],team_id,uid,'wrong',f'리허설 Lv{level} 오답')
+    else:
+        prior=c.execute('SELECT 1 FROM solves WHERE match_id=? AND problem_id=?',(m['id'],p['id'])).fetchone()
+        score=REWARD[level]//2 if prior and m['round']<=5 else REWARD[level]
+        c.execute('INSERT INTO submissions(match_id,user_id,problem_id,at,verdict,passed,total,code) VALUES (?,?,?,?,?,?,?,?)',
+                  (m['id'],uid,p['id'],now,'정답',len(judge_inputs(p)),len(judge_inputs(p)),'# 운영자 리허설 정답 · 실제 제출 코드 아님'))
+        c.execute('INSERT INTO solves(match_id,team_id,user_id,problem_id,at,win_points,solve_points) VALUES (?,?,?,?,?,?,?)',
+                  (m['id'],team_id,uid,p['id'],now,score,REWARD[level]))
+        c.execute('INSERT INTO credits(team_id,amount,available_round,reason,at) VALUES (?,?,?,?,?)',
+                  (team_id,REWARD[level],m['round'],'리허설 '+p['id'],now))
+        event(c,m['id'],team_id,uid,'solve',f'리허설 Lv{level} 정답 · +{score} 승점')
+        if m['round']==6 and level==5:close_match(c,m,team_id,'level5');tick(c)
 
 def problem_for(m,team,level):
     if m['round']==6: return LOOKUP[f'F{"A" if team==m["team_a"] else "B"}-L{level}']
@@ -228,8 +280,8 @@ def match_view(c,m,admin=False):
             s=c.execute('SELECT * FROM solves WHERE match_id=? AND user_id=?',(m['id'],u['id'])).fetchone()
             last=c.execute('SELECT verdict,at FROM submissions WHERE match_id=? AND user_id=? ORDER BY id DESC LIMIT 1',(m['id'],u['id'])).fetchone()
             d=c.execute('SELECT * FROM drafts WHERE match_id=? AND user_id=?',(m['id'],u['id'])).fetchone()
-            member={'id':u['id'],'name':u['name'] if u['profile_complete'] else '참가 전','level':row[0] if row else None,
-                    'ready':bool(ready and ready[0]),'enrolled':bool(u['profile_complete']),'online':time.time()-u['last_seen']<10,
+            member={'id':u['id'],'name':u['name'] if u['profile_complete'] else f'{t["name"]} Lv{u["level"]} (리허설)' if rehearsal(c) else '참가 전','level':row[0] if row else None,
+                    'ready':bool((ready and ready[0]) or rehearsal(c)),'enrolled':bool(u['profile_complete'] or rehearsal(c)),'online':time.time()-u['last_seen']<10,
                     'captain':u['id']==t['captain_user_id'],'win_points':s['win_points'] if s else 0,
                     'solved':bool(s),'verdict':last['verdict'].splitlines()[0] if last else '',
                     'purchases':[dict(h) for h in c.execute('SELECT kind,cost,at FROM purchases WHERE match_id=? AND user_id=?',(m['id'],u['id']))],
@@ -241,6 +293,21 @@ def match_view(c,m,admin=False):
                       'configured':bool(t['configured']),'members':members,'points':points(c,m['id'],tid),
                       'bonus':m['bonus'] if m['winner']==tid else 0,'credit':balance(c,tid)})
     return dict(m)|{'teams':teams,'scores':{str(t['id']):t['points'] for t in teams}}
+
+def upcoming_pairs(c,phase,round_no):
+    if phase not in ('live','results') or round_no>=6:return None
+    nxt=round_no+1
+    if nxt==6:
+        tie=final_tie(c)
+        if tie['required'] and not tie['chosen']:return {'round':6,'pairs':[],'pending_tie':True,'tentative':False}
+        selected=tie['chosen'] if tie['required'] else [t['id'] for t in standings(c)[:2]]
+        pairs=[selected];tentative=phase=='live'
+    else:
+        pairs=[(m['team_a'],m['team_b']) for m in c.execute('SELECT * FROM matches WHERE round=? ORDER BY id',(nxt,))]
+        tentative=False
+    return {'round':nxt,'pairs':[[{'id':tid,'name':t['name'],'logo':f'/api/logo/{tid}' if t['logo_data'] else None}
+                   for tid in pair for t in [c.execute('SELECT * FROM teams WHERE id=?',(tid,)).fetchone()]] for pair in pairs],
+            'pending_tie':False,'tentative':tentative}
 
 def snapshot(c,user):
     tick(c); r=current_round(c); phase=setting(c,'phase'); target=target_round(c)
@@ -264,6 +331,9 @@ def snapshot(c,user):
         ev=[e for e in ev if m and e['match_id']==m['id']]
     return {'epoch':epoch(c),'server_time':time.time(),'phase':phase,'round':r,'target_round':target,
             'api_check':dict(API_CHECK) if user['role']=='admin' else None,
+            'rehearsal':rehearsal(c),'tie':final_tie(c) if user['role']=='admin' and r==5 and phase=='results' else None,
+            'upcoming':upcoming_pairs(c,phase,r) if user['role']=='admin' else None,
+            'completed_matches':[match_view(c,x) for x in c.execute("SELECT * FROM matches WHERE status='closed' ORDER BY round DESC,id")] if user['role']=='admin' else None,
             'duration':600 if target==6 else 300,'matches':matches,'standings':standings(c),'costs':HINT_COST,'rewards':REWARD,
             'me':{'id':user['id'],'name':user['name'],'role':user['role'],'team_id':user['team_id'],'level':level,
                   'profile_complete':bool(user['profile_complete']),'is_captain':bool(t and t['captain_user_id']==user['id']),
@@ -341,9 +411,9 @@ def start_round(c):
     for m in matches:
         for tid in (m['team_a'],m['team_b']):
             t=c.execute('SELECT * FROM teams WHERE id=?',(tid,)).fetchone()
-            if not t['configured']: raise ValueError(f'{t["name"]} 팀명·로고 설정을 완료하세요.')
+            if not rehearsal(c) and not t['configured']: raise ValueError(f'{t["name"]} 팀명·로고 설정을 완료하세요.')
             players=list(c.execute('SELECT * FROM users WHERE team_id=?',(tid,)))
-            if len(players)!=5 or any(not p['profile_complete'] or not c.execute('SELECT 1 FROM round_ready WHERE round=? AND user_id=? AND ready=1',(target,p['id'])).fetchone() for p in players):
+            if len(players)!=5 or (not rehearsal(c) and any(not p['profile_complete'] or not c.execute('SELECT 1 FROM round_ready WHERE round=? AND user_id=? AND ready=1',(target,p['id'])).fetchone() for p in players)):
                 raise ValueError(f'{t["name"]} 팀원 5명의 준비 완료가 필요합니다.')
             picked=[(x['user_id'],x['level']) for x in c.execute('SELECT * FROM round_preferences WHERE round=? AND team_id=?',(target,tid))]
             remain=[p['id'] for p in players if p['id'] not in {x[0] for x in picked}]; secrets.SystemRandom().shuffle(remain)
@@ -369,7 +439,7 @@ def reset_all(c):
         c.execute('UPDATE teams SET name=?,captain_user_id=NULL,logo_data=NULL,configured=0,named=0 WHERE id=?',(name,tid))
         for u in list(c.execute('SELECT id,level FROM users WHERE team_id=?',(tid,))):
             c.execute('UPDATE users SET name=? WHERE id=?',(f'{name} {u["level"]}번',u['id']))
-    create_schedule(c); setval(c,'round',0); setval(c,'phase','matching'); setval(c,'epoch',secrets.token_hex(8)); LOGO_JOBS.clear()
+    create_schedule(c); setval(c,'rehearsal',0);setval(c,'final_a','');setval(c,'final_b',''); setval(c,'round',0); setval(c,'phase','matching'); setval(c,'epoch',secrets.token_hex(8)); LOGO_JOBS.clear()
 
 
 def placeholders(name):
@@ -465,6 +535,22 @@ class Handler(BaseHTTPRequestHandler):
                         if judge_provider()!='openai' or not judge_enabled(): raise ValueError('JUDGE_PROVIDER=openai 및 OPENAI_API_KEY를 설정하세요.')
                         API_CHECK.clear(); API_CHECK.update(status='running',results=[],started=time.time())
                         threading.Thread(target=api_check_worker,daemon=True).start()
+                    elif path=='/api/admin/rehearsal':
+                        if current_round(c)!=0 or setting(c,'phase')!='matching':raise ValueError('리허설 모드는 첫 라운드 시작 전에만 설정할 수 있습니다. 진행 기록 초기화가 필요합니다.')
+                        if type(b.get('enabled')) is not bool:raise ValueError('리허설 설정 오류')
+                        setval(c,'rehearsal',int(b['enabled']))
+                    elif path=='/api/admin/simulate':
+                        simulate_result(c,b.get('match_id'),b.get('team_id'),b.get('level'),b.get('verdict'))
+                    elif path=='/api/admin/finalists':
+                        if current_round(c)!=5 or setting(c,'phase')!='results':raise ValueError('럼블 5라운드 결과 확인 단계에서만 지정할 수 있습니다.')
+                        tie=final_tie(c)
+                        if not tie['required']:raise ValueError('결승 진출 경계에 동점이 없습니다.')
+                        a,other=b.get('team_a'),b.get('team_b')
+                        if type(a) is not int or type(other) is not int or a==other:raise ValueError('서로 다른 두 팀을 선택하세요.')
+                        eligible={x['id'] for x in tie['candidates']}
+                        if a not in eligible or other not in eligible or (tie['locked_first'] and tie['locked_first'] not in (a,other)):
+                            raise ValueError('상위 확정 팀과 동점 후보 안에서 두 팀을 선택하세요.')
+                        setval(c,'final_a',a);setval(c,'final_b',other)
                     elif path=='/api/admin/start': start_round(c)
                     elif path=='/api/admin/close':
                         if setting(c,'phase')!='live': raise ValueError('진행 중인 라운드가 없습니다.')

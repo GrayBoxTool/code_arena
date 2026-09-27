@@ -20,7 +20,7 @@ class FakeAPI:
             self.script=msg.get_payload(0).get_payload(decode=True).decode()
             return {'path':'/mnt/data/test-runner.py'}
         if path=='responses':
-            self.command=payload['input'][0]['content']
+            self.command=payload['input'][0]['content'].split('\n')[-1]
             result=subprocess.run([sys.executable,'-c',self.script],capture_output=True,text=True,timeout=20)
             assert result.returncode==0,result.stderr
             response={'status':'completed','output':[{'type':'code_interpreter_call','status':'completed','container_id':'cntr_test','code':self.command,'outputs':[{'type':'logs','logs':result.stdout}]}]}
@@ -43,6 +43,10 @@ class RemoteJudgeTest(unittest.TestCase):
                 else:self.assertTrue(result[0].startswith(wanted),result)
         self.assertEqual(sum(x[2].get('method')=='DELETE' for x in self.fake.calls),4)
         self.assertNotIn('solution',self.fake.script.split('execute(json.loads(')[-1])
+    def test_safe_quote_and_read_variation_from_model(self):
+        self.fake.tamper=lambda r:r['output'][0].update(code='exec(open("/mnt/data/test-runner.py").read())')
+        result=remote.judge_remote(reference_code(PROBLEMS[0]),PROBLEMS[0])
+        self.assertEqual(result[0],'정답')
     def test_ignore_narrative_and_reject_modified_execution(self):
         for mutation in [lambda r:r['output'].clear(),lambda r:r['output'][0].update(code='print("정답")'),
                          lambda r:r['output'].append(copy.deepcopy(r['output'][0])),
@@ -84,3 +88,22 @@ class ServerFailureTest(unittest.TestCase):
                 self.assertFalse(server.SUBMITTING)
             finally:http.shutdown();http.server_close();thread.join()
 if __name__=='__main__':unittest.main()
+
+from execution_validation import authorized_execution
+class CommandValidationTest(unittest.TestCase):
+    def test_equivalent_runner_commands_and_rejected_variations(self):
+        path='/mnt/data/runner.py'
+        safe=[
+            f'exec(compile(open({path!r}, encoding="utf-8").read(), {path!r}, "exec"))',
+            f'# run once\nexec(compile(open("{path}", encoding=\'utf-8\').read(), "{path}", \'exec\'))',
+            f'exec(open("{path}").read())',
+            f'with open("{path}") as f:\n    exec(f.read())',
+            f'from pathlib import Path\nexec(Path("{path}").read_text())' # rejected until explicitly supported
+        ]
+        self.assertTrue(all(authorized_execution(x,path) for x in safe[:4]))
+        self.assertFalse(authorized_execution(safe[4],path))
+        bad=[f'exec(open("/mnt/data/other.py").read())',f'exec(open("{path}").read())\nprint(1)',
+             f'exec(open("{path}").read().replace("verify", "skip"))',
+             f'exec(open("{path}").read())\nexec(open("{path}").read())',
+             'import os\nos.system("id")',f'open("{path}", "w").write("hi")']
+        self.assertTrue(all(not authorized_execution(x,path) for x in bad))

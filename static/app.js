@@ -9,6 +9,7 @@ let auth=sessionStorage.getItem('rumble_token')||'',state=null,busy=false,view='
 let submitError='',pendingSubmission=null;
 let noticeTimer,editState=null,saveTimer,inspectId=null,inspectMode='draft',compareLevel=1,compareMatch=null;
 let seenEvent=0,seenEpoch='',lastTeamSetup='',lastLobby='',gaugeWidths=new Map();
+let finalChoiceA=null,finalChoiceB=null;
 const now=()=>Date.now()/1000+clockOffset;
 const roundLabel=r=>r===6?'FINAL':`RUMBLE ${r}`;
 const seconds=end=>Math.max(0,Math.ceil((end||0)-now()));
@@ -62,14 +63,42 @@ function compare(s){
   const members=m.teams.map(t=>t.members.find(x=>x.level===compareLevel));const lines=members.map(x=>(x?.draft||'').split('\n'));
   return `<section class="panel full-board compare"><div class="compare-tools"><h2>실시간 코드 비교</h2><select id="compare-match">${matches.map(x=>`<option value="${x.id}" ${x.id===m.id?'selected':''}>${esc(x.teams[0].name)} vs ${esc(x.teams[1].name)}</option>`).join('')}</select><select id="compare-level">${[1,2,3,4,5].map(l=>`<option value="${l}" ${l===compareLevel?'selected':''}>레벨 ${l}</option>`).join('')}</select></div><div class="compare-grid">${members.map((x,i)=>`<div><h3>${esc(m.teams[i].name)} · ${esc(x?.name)} ${x?.solved?'✓':''}</h3><pre class="compare-code" data-scroll="compare-${i}">${lines[i].map((line,j)=>`<span class="code-line ${line!==lines[1-i][j]?'different':''}"><i>${j+1}</i>${esc(line)||' '}</span>`).join('')}</pre></div>`).join('')}</div><p class="meta">1~2초 간격으로 동기화된 코드를 표시합니다. 색이 있는 줄은 상대 코드와 다른 줄입니다.</p></section>`;
 }
+function previewCard(info){
+  if(!info)return '';
+  return `<section class="panel full-board"><h2>다음 ${roundLabel(info.round)} 대진 ${info.tentative?'· 현재 순위 기준 잠정':''}</h2>${info.pending_tie?'<p>진출권 동점입니다. 아래에서 결승 진출팀을 먼저 지정하세요.</p>':info.pairs.map(pair=>`<div class="preview-pair">${pair.map(t=>`<span>${t.logo?`<img src="${imageURL(t.logo)}" alt="">`:''}<strong>${esc(t.name)}</strong></span>`).join('<b>VS</b>')}</div>`).join('')}</section>`;
+}
+function historyCard(matches){
+  return `<section class="panel full-board"><h2>지금까지의 경기 결과</h2>${matches.length?`<div class="history-grid">${matches.map(m=>`<div class="history-match"><span>${roundLabel(m.round)}</span><div>${m.teams.map(t=>`<span class="${m.winner===t.id?'history-winner':''}">${t.logo?`<img src="${imageURL(t.logo)}" alt="">`:''}${esc(t.name)} <strong>${fmt(t.points+(m.winner===t.id?m.bonus:0))}</strong> ${esc(outcome(m,t.id))}</span>`).join('<b>VS</b>')}</div></div>`).join('')}</div>`:'<p class="meta">종료된 경기가 없습니다.</p>'}</section>`;
+}
+function rehearsalControls(m){return `<div class="panel rehearsal-controls" data-rehearsal-match="${m.id}"><div><strong>리허설 판정 · ${esc(m.teams[0].name)} vs ${esc(m.teams[1].name)}</strong><p class="meta">실제 코드 제출과 OpenAI 호출 없이 점수·승패를 시험합니다. 실제 제출 코드는 생성하지 않습니다.</p></div><div class="rehearsal-tools"><select data-rehearsal-team aria-label="리허설 팀">${m.teams.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select><select data-rehearsal-level aria-label="리허설 레벨">${[1,2,3,4,5].map(l=>`<option value="${l}">Lv${l}</option>`).join('')}</select><button class="primary" data-simulate="correct">정답 처리</button><button class="secondary" data-simulate="wrong">오답 연출</button></div></div>`;}
+function tieSelection(tie){
+  if(!tie?.required)return '';
+  const allowed=tie.candidates;
+  if(finalChoiceA===null||!allowed.some(x=>x.id===finalChoiceA))finalChoiceA=tie.chosen?.[0]??allowed[0]?.id;
+  if(finalChoiceB===null||!allowed.some(x=>x.id===finalChoiceB))finalChoiceB=tie.chosen?.[1]??allowed[1]?.id;
+  return `<section class="panel full-board tie-choice"><h2>결승 진출 동점 결정</h2><p>결승 진출 경계에서 누적 승점이 같습니다. 대회 밖에서 합의한 두 팀을 선택하고 확정하세요.${tie.locked_first?` ${esc(allowed.find(x=>x.id===tie.locked_first)?.name)} 팀은 상위 확정 팀이므로 반드시 포함해야 합니다.`:''}</p><div class="tie-fields">${['A','B'].map(slot=>`<label>결승 ${slot}팀<select data-final-choice="${slot}">${allowed.map(t=>`<option value="${t.id}" ${(slot==='A'?finalChoiceA:finalChoiceB)===t.id?'selected':''}>${esc(t.name)} · ${t.points}점 · ${t.wins}승 · 정답 ${t.solved}</option>`).join('')}</select></label>`).join('')}<button class="primary" id="confirm-finalists">진출팀 확정</button></div>${tie.chosen?`<p class="meta">확정됨: ${esc(allowed.find(x=>x.id===tie.chosen[0])?.name)} vs ${esc(allowed.find(x=>x.id===tie.chosen[1])?.name)} · 변경하려면 다시 확정하세요.</p>`:'<p class="meta">확정 전에는 다음 대진을 열 수 없습니다.</p>'}</section>`;
+}
 function adminView(s){
   const phaseText={matching:'대진·준비 확인',live:'경기 진행 중',results:'결과 확인',finished:'대회 종료'}[s.phase];
-  app.innerHTML=`<div class="topline"><div><div class="eyebrow">TOURNAMENT CONTROL</div><h1>${roundLabel(s.target_round)} · ${phaseText}</h1></div><button class="secondary danger" id="reset-all">전체 초기화</button></div>
-  <div class="admin-action">${s.phase==='matching'?'<button class="primary" id="start-round">준비 확인 · 라운드 시작</button><span class="meta">경기에 참여하는 모든 팀원의 준비 완료가 필요합니다.</span>':s.phase==='live'?'<button class="secondary" id="close-round">현재 라운드 종료</button><span class="meta">시간 만료 시 자동 종료됩니다.</span>':s.phase==='results'?'<button class="primary" id="next-round">결과 확인 완료 · 다음 대진 열기</button>':'<strong>결승이 종료되었습니다. 새 대회는 전체 초기화 후 시작하세요.</strong>'}</div>
+  const actionHTML=s.phase==='matching'
+    ?`<button class="primary" id="start-round">준비 확인 · 라운드 시작</button><span class="meta">${s.rehearsal?'리허설: 선수 접속 없이 시작합니다.':'경기에 참여하는 모든 팀원의 준비 완료가 필요합니다.'}</span>`
+    :s.phase==='live'
+      ?'<button class="secondary" id="close-round">현재 라운드 종료</button><span class="meta">시간 만료 시 자동 종료됩니다.</span>'
+      :s.phase==='results'
+        ?`<button class="primary" id="next-round" ${s.tie?.required&&!s.tie?.chosen?'disabled':''}>${s.tie?.required&&!s.tie?.chosen?'동점 결정 후 다음 대진 열기':'결과 확인 완료 · 다음 대진 열기'}</button>`
+        :'<strong>결승이 종료되었습니다. 새 대회는 전체 초기화 후 시작하세요.</strong>';
+  app.innerHTML=`<div class="topline"><div><div class="eyebrow">TOURNAMENT CONTROL ${s.rehearsal?'· REHEARSAL':''}</div><h1>${roundLabel(s.target_round)} · ${phaseText}</h1></div><button class="secondary danger" id="reset-all">전체 초기화</button></div>
+  ${s.phase==='matching'&&s.round===0?`<section class="panel full-board rehearsal-switch"><div><h2>혼자 진행하는 리허설 ${s.rehearsal?'· 사용 중':''}</h2><p>선수 25명의 접속·준비 없이 라운드를 시작하고 운영자가 정답·오답을 시험합니다. 대회 기록을 초기화하지 않고 첫 라운드 전까지만 변경할 수 있습니다.</p></div><button class="secondary" id="toggle-rehearsal">${s.rehearsal?'리허설 끄기':'리허설 켜기'}</button></section>`:''}
+  <div class="admin-action">${actionHTML}</div>
   ${!s.judge_enabled?'<p class="notice-box">OpenAI 채점이 설정되지 않았습니다. Render의 OPENAI_API_KEY와 JUDGE_PROVIDER를 확인하세요.</p>':''}
   <section class="panel full-board"><h2>OpenAI 연결 상태</h2><p>채점: ${esc(s.judge_provider)} · ${s.judge_enabled?'설정됨 (실제 연결 시험 필요)':'설정 필요'}</p><button class="secondary" id="api-check" ${s.phase==='live'||s.api_check?.status==='running'?'disabled':''}>채점·AI 조언 연결 시험 (유료 호출)</button><p>${s.api_check?.status==='running'?'연결 시험 중… 최대 수 분 걸릴 수 있습니다.':''}</p>${(s.api_check?.results||[]).map(x=>`<p>${x.ok?'✓':'✕'} ${esc(x.name)} · ${x.seconds}초 · ${esc(x.detail)}</p>`).join('')}<p class="meta">로고는 팀장 화면에서 후보 생성으로 확인하세요. 연결 시험은 대회 점수에 반영되지 않습니다.</p></section>
-  ${s.matches.map(m=>matchCard(m,true)).join('')}${compare(s)}${board(s)}<section class="panel full-board"><h2>최근 경기 이벤트</h2><div class="event-log">${s.events.slice(-15).reverse().map(e=>`<p>${new Date(e.at*1000).toLocaleTimeString()} · ${esc(e.detail)}</p>`).join('')}</div></section>`;
+  ${s.matches.map(m=>matchCard(m,true)+(s.rehearsal&&s.phase==='live'?rehearsalControls(m):'')).join('')}
+  ${tieSelection(s.tie)}${previewCard(s.upcoming)}${historyCard(s.completed_matches||[])}${compare(s)}${board(s)}<section class="panel full-board"><h2>최근 경기 이벤트</h2><div class="event-log">${s.events.slice(-15).reverse().map(e=>`<p>${new Date(e.at*1000).toLocaleTimeString()} · ${esc(e.detail)}</p>`).join('')}</div></section>`;
   const bind=(id,path,msg)=>{const b=app.querySelector(id);if(b)b.onclick=()=>{if(!msg||confirm(msg))action(path);};};
+  const rehearsalButton=app.querySelector('#toggle-rehearsal');if(rehearsalButton)rehearsalButton.onclick=()=>action('admin/rehearsal',{enabled:!s.rehearsal});
+  app.querySelectorAll('[data-rehearsal-match]').forEach(panel=>panel.querySelectorAll('[data-simulate]').forEach(button=>button.onclick=()=>action('admin/simulate',{match_id:Number(panel.dataset.rehearsalMatch),team_id:Number(panel.querySelector('[data-rehearsal-team]').value),level:Number(panel.querySelector('[data-rehearsal-level]').value),verdict:button.dataset.simulate})));
+  app.querySelectorAll('[data-final-choice]').forEach(el=>el.onchange=()=>{if(el.dataset.finalChoice==='A')finalChoiceA=Number(el.value);else finalChoiceB=Number(el.value);});
+  const finalists=app.querySelector('#confirm-finalists');if(finalists)finalists.onclick=()=>{if(finalChoiceA===finalChoiceB)return toast('서로 다른 두 팀을 선택하세요.');action('admin/finalists',{team_a:finalChoiceA,team_b:finalChoiceB});};
   bind('#api-check','admin/api-check','실제 OpenAI API 사용료가 발생합니다. 정답·오답·실행 오류 채점 3건과 AI 조언 1건을 시험할까요?');
   bind('#start-round','admin/start','준비된 팀들의 경기를 시작할까요?');bind('#close-round','admin/close','남은 시간과 관계없이 현재 라운드를 종료할까요?');bind('#next-round','admin/next');
   app.querySelector('#reset-all').onclick=()=>{const text=prompt('모든 경기 기록, 이름, 팀명, 로고, 포인트가 초기화됩니다. 접속 코드는 유지됩니다. 진행하려면 전체 초기화를 입력하세요.');if(text==='전체 초기화')action('admin/reset',{confirmation:text});};

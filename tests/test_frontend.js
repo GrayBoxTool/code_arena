@@ -9,7 +9,7 @@ const sessionStorage = {
   setItem: (key, value) => stored.set(key, value),
   removeItem: key => stored.delete(key),
 };
-const element = {querySelector: () => ({})};
+const element = {querySelector: () => ({}),querySelectorAll: () => []};
 const intervals = [];
 const context = vm.createContext({
   window: {}, sessionStorage, setInterval: (callback, delay) => intervals.push({callback, delay}), clearTimeout: () => {},
@@ -65,6 +65,16 @@ context.document.activeElement={tagName:'SELECT'};
 vm.runInContext(`ingest({...state,standings:[{points:100}]});`,context);
 assert.equal(context.window.renderCount,undefined);
 console.log('Frontend editor, lifecycle and polling preservation: OK');
+
+// Operator controls show the rehearsal switch and require a tie decision before advancing.
+context.requestAnimationFrame=()=>{};
+const rehearsalHtml=vm.runInContext(`(function(){adminView({phase:'matching',round:0,target_round:1,rehearsal:true,matches:[],standings:[],events:[],me:{team_id:null},judge_provider:'local',judge_enabled:false,completed_matches:[]});return app.innerHTML})()`,context);
+assert.ok(rehearsalHtml.includes('리허설 끄기'));
+assert.ok(rehearsalHtml.includes('선수 접속 없이 시작'));
+const tieHtml=vm.runInContext(`(function(){adminView({phase:'results',round:5,target_round:5,rehearsal:true,matches:[],standings:[],events:[],me:{team_id:null},judge_provider:'local',judge_enabled:false,completed_matches:[],tie:{required:true,chosen:null,locked_first:1,candidates:[{id:1,name:'첫 팀',points:400,wins:2,solved:3},{id:2,name:'둘째 팀',points:300,wins:1,solved:2},{id:3,name:'셋째 팀',points:300,wins:0,solved:1}]},upcoming:{round:6,pending_tie:true,pairs:[]}});return app.innerHTML})()`,context);
+assert.match(tieHtml,/id="next-round" disabled/);
+assert.ok(tieHtml.includes('결승 진출 동점 결정'));
+assert.ok(tieHtml.includes('첫 팀'));
 
 // Polling a submission acknowledgement must preserve edits made during remote judging.
 vm.runInContext(`editState={match:3,rev:2,code:'new edits',dirty:true};pendingSubmission={match:3,rev:2,code:'submitted code'};
