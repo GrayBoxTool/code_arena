@@ -1,10 +1,22 @@
-Create an original esports tournament team emblem for the name '{team_name}'.
-Visual direction: bold symmetrical heraldic silhouette, sharp geometric animal or
-mythic motif, confident negative space, compact vector-like shapes, high contrast,
-premium competitive gaming identity, dark backdrop, clean edges, legible at 64px.
-Use only the supplied team name as text, if any. Make an independent design: do not
-reproduce or closely imitate any existing esports team logo, trademark, mascot,
-crest, lettermark or distinctive color arrangement. Square composition.
+Create three DISTINCT ORIGINAL esports team logo candidates for the new team "{team_name}".
+Each output must contain ONE centered emblem, never a collage or a contact sheet.
 
-The prototype sends this stylistic prompt to the image generation API. It does
-not train a model on logos from Worlds teams or bundle their artwork.
+Two attached sheets contain 30 historical Korean esports team logos. The small English labels
+identify the reference teams; they are NOT the name of the new team. The accompanying Korean
+names are phonetic aliases. Recognize English and Korean aliases as the same historical team.
+If the new team name is Korean, interpret its meaning and common foreign-word transliteration
+naturally. Use its meaning or initials to invent a new symbol. Do not arbitrarily use a reference
+team's initials just because its name sounds similar.
+
+Observed design vocabulary:
+- Bold, compact silhouettes, strong negative space and clean edges that remain clear at avatar size.
+- Angular monograms and interlocking letters; simplified wing or motion strokes.
+- Stylized animals, energetic diagonals, optional shield or circular badge frameworks.
+- Restrained palettes: one or two vivid accents plus a dark or neutral base.
+
+Explore clearly different alternatives: an abstract initial-based mark, a symbolic creature/emblem,
+and a compact geometric badge. Use the reference collection for broad visual vocabulary, not
+for copying a specific team's recognizable silhouette, letterform arrangement or sponsor branding.
+Invent the new team's own identity. Avoid tiny lettering, copied team names, sponsor names,
+photographs, complex scenes, 3D mockups and presentation boards. Prefer a clean flat design
+on a simple dark background. The final result should work as a 128px lobby avatar.

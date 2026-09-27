@@ -155,7 +155,7 @@ for problem in PROBLEMS:
     problem["cases"].extend(EXTRA_CASES[problem["id"]])
 
 REWARD = {1: 100, 2: 150, 3: 200, 4: 250, 5: 300}
-HINT_COST = {"type": 50, "structure": 120, "assist": 250}
+HINT_COST = {"type": 50, "structure": 150, "assist": 300}
 
 
 def reference_code(problem):
@@ -173,24 +173,30 @@ def judge_inputs(problem):
     return [str(len(group)) + "\n" + "".join(group) for group in groups]
 
 
-def expected_outputs(problem):
-    """Run only developer-authored reference code with controlled in-memory IO."""
-    import contextlib
-    import io
-    result = []
-    code = compile(reference_code(problem), f'<reference:{problem["id"]}>', "exec")
-    for case in judge_inputs(problem):
-        stdin, stdout = io.StringIO(case), io.StringIO()
-        with contextlib.redirect_stdout(stdout):
-            import sys
-            prior = sys.stdin
-            try:
-                sys.stdin = stdin
-                exec(code, {"__name__": "__main__"})
-            finally:
-                sys.stdin = prior
+from functools import lru_cache
+import builtins as _builtins
+import io as _io
+
+@lru_cache(maxsize=256)
+def _reference_outputs(solution, inputs):
+    result=[]
+    for text in inputs:
+        stdin, stdout = _io.StringIO(text), _io.StringIO()
+        functions = vars(_builtins).copy()
+        def read(prompt=''):
+            line=stdin.readline()
+            if line=='': raise EOFError('reference input exhausted')
+            return line.rstrip('\n')
+        def write(*args, **kwargs):
+            kwargs['file']=stdout
+            _builtins.print(*args, **kwargs)
+        functions.update(input=read, print=write)
+        exec(solution, {'__name__':'__main__','__builtins__':functions})
         result.append(stdout.getvalue())
-    return result
+    return tuple(result)
+
+def expected_outputs(problem):
+    return list(_reference_outputs(reference_code(problem), tuple(judge_inputs(problem))))
 
 
 def public_problem(problem):
@@ -198,3 +204,8 @@ def public_problem(problem):
     result["input"] = "첫 줄에 테스트케이스 수 T(1≤T≤3)가 주어진다. 각 테스트케이스마다 " + result["input"]
     result["output"] = "각 테스트케이스의 정답을 '#tc 정답' 형식으로 한 줄씩 출력한다. " + result["output"]
     return result
+
+# Five unique rumble rounds and two balanced, distinct final lanes.
+from bank_v2 import build_bank
+PROBLEMS = build_bank(PROBLEMS)
+HINT_COST = {"type": 50, "structure": 150, "assist": 300}

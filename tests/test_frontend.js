@@ -10,8 +10,9 @@ const sessionStorage = {
   removeItem: key => stored.delete(key),
 };
 const element = {querySelector: () => ({})};
+const intervals = [];
 const context = vm.createContext({
-  window: {}, sessionStorage, setInterval: () => {}, clearTimeout: () => {},
+  window: {}, sessionStorage, setInterval: (callback, delay) => intervals.push({callback, delay}), clearTimeout: () => {},
   document: {querySelector: () => element},
 });
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/editor.js'), 'utf8'), context);
@@ -31,48 +32,43 @@ const wrapped = editor.pairEdit('foo', 0, 3, '[');
 assert.equal(wrapped.value, '[foo]');
 assert.equal(wrapped.end, 4);
 
-const phase = (state, now) => vm.runInContext('playerPhase', context)(state, now);
-const state = {me:{team_id:1},match:{id:3,status:'open',end_at:1000},
-  problems:[{id:'S1-L1'}],solves:[]};
-assert.equal(phase(state, 800), 'play');
-state.solves = [{team_id:1,problem_id:'S1-L1'}];
-assert.equal(phase(state, 800), 'solved-wait');
-assert.equal(phase(state, 1000), 'solved-ready');
-state.solves = [];
-assert.equal(phase(state, 1000), 'failed');
-assert.equal(phase(state, 1009), 'failed');
-assert.equal(phase(state, 1010), 'lobby');
-assert.equal(phase(state, 800), 'lobby');
+const phase = vm.runInContext('phase', context);
+const timestamp = Date.now()/1000;
+const state = {me:{role:'player',profile_complete:true,is_captain:false},phase:'live',
+  match:{id:3,settled:false,end_at:timestamp+100},problem:{id:'R1-L1'},solved:false};
+assert.equal(phase(state),'play');
+state.solved=true;assert.equal(phase(state),'solved');
+state.match.settled=true;state.match.end_at=timestamp-1;assert.equal(phase(state),'result');
+state.match.end_at=timestamp-11;assert.equal(phase(state),'lobby');
+state.phase='finished';assert.equal(phase(state),'result');
+state.phase='matching';assert.equal(phase(state),'lobby');
+state.me.is_captain=true;state.team_setup={complete:false};assert.equal(phase(state),'team-setup');
+state.me.profile_complete=false;assert.equal(phase(state),'profile');
+state.me.role='admin';assert.equal(phase(state),'admin');
 
-stored.clear();
-context.RumbleEditor = editor;
-const now = Date.now()/1000;
-const screen = {
-  me:{team_id:1,name:'블루 1번',level:1}, round:1,
-  match:{id:4,team_a:1,team_b:2,team_a_name:'블루',team_b_name:'레드',
-    status:'open',end_at:now+60, scores:{1:100,2:0}},
-  matches:[], problems:[{id:'S1-L1',title:'충전 기록',reward:100}],
-  solves:[{team_id:1,problem_id:'S1-L1',win_points:100}],
-  standings:[{id:1,name:'블루',points:100,credit:0,wins:0,solved:1}],
-  lobby_teams:[{id:1,name:'블루',logo:null,roster:[{id:1,name:'민수',captain:true,selected_level:1}]}],
-  rewards:{1:100,2:150,3:200,4:250,5:300},
-};
-vm.runInContext('playerView', context)(screen);
-assert.match(element.innerHTML,/정답 제출 완료/);
-assert.doesNotMatch(element.innerHTML,/return-lobby/);
-screen.match.end_at=now-1;
-vm.runInContext('playerView', context)(screen);
-assert.match(element.innerHTML,/대기실로 돌아가기/);
-screen.solves=[];
-screen.match.end_at=Date.now()/1000-1;
-vm.runInContext('playerView', context)(screen);
-assert.match(element.innerHTML,/\d+<\/strong>초 후 대기실로 자동 이동/);
-const choices={...screen, next_selection:{round:2,members:[
-  {id:1,name:'민수',level:2},{id:2,name:'지우',level:null},
-  {id:3,name:'A',level:5},{id:4,name:'B',level:null},{id:5,name:'C',level:null}]}};
-choices.me.id=2;
-const selection=vm.runInContext('selectionCard',context)(choices);
-assert.match(selection,/Lv2/);
-assert.match(selection,/민수 선택/);
-assert.match(selection,/disabled/);
-console.log('Frontend editor and match phases: OK');
+// Polling must not remount an unchanged captain form; the clock must not render it.
+context.document.querySelectorAll=()=>[];
+context.Date=Date;
+vm.runInContext(`state={epoch:'e',server_time:Date.now()/1000,me:{role:'player',profile_complete:true,is_captain:true},team_setup:{complete:false},events:[]};
+view='team-setup';lastTeamSetup=JSON.stringify({me:state.me,setup:state.team_setup});
+render=()=>{window.renderCount=(window.renderCount||0)+1;};
+ingest({...state,server_time:state.server_time+1});`,context);
+intervals.find(x=>x.delay===250).callback();
+assert.equal(context.window.renderCount,undefined);
+
+// An unchanged lobby and a focused dropdown survive polling.
+vm.runInContext(`state={epoch:'e',server_time:Date.now()/1000,me:{role:'player',profile_complete:true,is_captain:false},phase:'matching',matches:[],standings:[],target_round:1,events:[]};
+view='lobby';lastLobby=JSON.stringify({me:state.me,matches:state.matches,standings:state.standings,selection:state.selection,phase:state.phase,target:state.target_round});
+ingest({...state,server_time:state.server_time+1});`,context);
+assert.equal(context.window.renderCount,undefined);
+context.document.activeElement={tagName:'SELECT'};
+vm.runInContext(`ingest({...state,standings:[{points:100}]});`,context);
+assert.equal(context.window.renderCount,undefined);
+console.log('Frontend editor, lifecycle and polling preservation: OK');
+
+// Polling a submission acknowledgement must preserve edits made during remote judging.
+vm.runInContext(`editState={match:3,rev:2,code:'new edits',dirty:true};pendingSubmission={match:3,rev:2,code:'submitted code'};
+acceptDraft({match_id:3,rev:3,code:'submitted code'});`,context);
+assert.equal(vm.runInContext('editState.code',context),'new edits');
+assert.equal(vm.runInContext('editState.rev',context),3);
+assert.equal(vm.runInContext('editState.dirty',context),true);

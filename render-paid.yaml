@@ -4,7 +4,7 @@ services:
     name: code-rumble-api
     runtime: python
     plan: starter
-    buildCommand: "python -m py_compile server.py problems.py"
+    buildCommand: "python -m compileall -q ."
     startCommand: "python server.py"
     healthCheckPath: /
     disk:
@@ -21,4 +21,12 @@ services:
       - key: ACCESS_SEED
         sync: false
       - key: OPENAI_IMAGE_MODEL
-        value: gpt-image-1
+        value: gpt-image-2.5-flare
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: JUDGE_PROVIDER
+        value: openai
+      - key: OPENAI_JUDGE_MODEL
+        value: gpt-4.1-mini
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini

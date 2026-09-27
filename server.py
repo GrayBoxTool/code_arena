@@ -1,669 +1,652 @@
-"""Tournament prototype. Public deployments require an isolated judge; see README."""
+"""Code Rumble server. OpenAI-hosted execution for public deployments; trusted local judge for localhost."""
+import ast
+from openai_judge import judge_submission, enabled as judge_enabled, provider as judge_provider, JudgeUnavailable
+from logo_service import create_logos
+from api_check import run_checks
 import base64
+import builtins
 import hashlib
-import html
 import hmac
+import html
+import io
 import json
+import keyword
 import os
+import random
 import secrets
 import sqlite3
-import subprocess
+import string
 import sys
-import tempfile
+import threading
 import time
-import urllib.error
+import tokenize
 import urllib.request
+import urllib.error
+from collections import Counter
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import RLock
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
+from problems import PROBLEMS, REWARD, HINT_COST, public_problem, judge_inputs, expected_outputs
+from bank_v2 import relay_case
+from services import judge, assist
 
-from problems import HINT_COST, PROBLEMS, REWARD, expected_outputs, judge_inputs, public_problem
-
-ROOT = Path(__file__).resolve().parent
-DATA = Path(os.environ.get("RUMBLE_DATA_DIR", str(ROOT / "data")))
-DB = DATA / "rumble.sqlite3"
-LOCK = RLock()
-LOOKUP = {p["id"]: p for p in PROBLEMS}
-ANSWERS = {p["id"]: expected_outputs(p) for p in PROBLEMS}
-ROUNDS = [[(1, 2), (3, 4)], [(1, 3), (2, 5)], [(1, 4), (3, 5)],
-          [(1, 5), (2, 4)], [(2, 3), (4, 5)]]
-TEAM_NAMES = ["블루", "레드", "골드", "바이올렛", "민트"]
-ROUND_SECONDS = 300
-FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "").rstrip("/")
-LOGO_PROMPT = ("Create an original esports tournament team emblem for the name '{name}'. "
-               "Visual direction: bold symmetrical heraldic silhouette, sharp geometric animal or "
-               "mythic motif, confident negative space, compact vector-like shapes, high contrast, "
-               "premium competitive gaming identity, dark backdrop, clean edges, legible at 64px. "
-               "Use only the supplied team name as text, if any. Make an independent design: "
-               "do not reproduce or closely imitate any existing esports team logo, trademark, "
-               "mascot, crest, lettermark or distinctive color arrangement. Square composition.")
-
-
-def access_token(role, team_id=0, level=0):
-    """Keep access codes stable across ephemeral free-service restarts."""
-    seed = os.environ.get("ACCESS_SEED")
-    if not seed:
-        return secrets.token_urlsafe(24 if role == "admin" else 18)
-    if len(seed) < 32:
-        raise ValueError("ACCESS_SEED는 추측하기 어려운 32자 이상의 값으로 설정하세요.")
-    label = f"code-rumble:v1:{role}:{team_id}:{level}".encode()
-    digest = hmac.new(seed.encode(), label, hashlib.sha256).digest()[:24]
-    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
-
+ROOT=Path(__file__).resolve().parent
+DATA=Path(os.environ.get('RUMBLE_DATA_DIR',str(ROOT/'data')))
+DB=DATA/'rumble.sqlite3'
+LOCK=threading.RLock()
+API_CHECK={}
+ROUND_SECONDS=300
+FINAL_SECONDS=600
+TEAM_NAMES=['블루','레드','골드','바이올렛','민트']
+ROUNDS=[[(1,2),(3,4)],[(1,3),(2,5)],[(1,4),(3,5)],[(1,5),(2,4)],[(2,3),(4,5)]]
+LOOKUP={p['id']:p for p in PROBLEMS}
+FRONTEND_ORIGIN=os.environ.get('FRONTEND_ORIGIN','').strip().rstrip('/')
+LOGO_JOBS={}
+SUBMITTING=set()
 
 @contextmanager
 def db():
-    conn = sqlite3.connect(DB, timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA busy_timeout=10000")
+    c=sqlite3.connect(DB,timeout=15)
+    c.row_factory=sqlite3.Row
+    c.execute('PRAGMA foreign_keys=ON')
     try:
-        yield conn
-        conn.commit()
+        yield c
+        c.commit()
     except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+        c.rollback(); raise
+    finally: c.close()
 
+def access_token(role,team_id=0,level=0):
+    seed=os.environ.get('ACCESS_SEED')
+    if not seed: return secrets.token_urlsafe(24)
+    if len(seed)<32: raise ValueError('ACCESS_SEED는 32자 이상으로 설정하세요.')
+    raw=hmac.new(seed.encode(),f'code-rumble:v1:{role}:{team_id}:{level}'.encode(),hashlib.sha256).digest()[:24]
+    return base64.urlsafe_b64encode(raw).decode().rstrip('=')
+
+def setting(c,key,default=''):
+    row=c.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone()
+    return row[0] if row else default
+
+def setval(c,key,value):
+    c.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',(key,str(value)))
+
+def current_round(c): return int(setting(c,'round','0'))
+def epoch(c): return setting(c,'epoch','1')
+
+def create_schedule(c):
+    for r,pairs in enumerate(ROUNDS,1):
+        for a,b in pairs:
+            c.execute('INSERT INTO matches(round,team_a,team_b,problem_set) VALUES (?,?,?,?)',(r,a,b,r))
 
 def setup():
-    DATA.mkdir(parents=True, exist_ok=True)
+    DATA.mkdir(parents=True,exist_ok=True)
     with db() as c:
-        c.executescript("""
-        CREATE TABLE IF NOT EXISTS teams(id INTEGER PRIMARY KEY, name TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, name TEXT NOT NULL,
-          team_id INTEGER, level INTEGER, token TEXT UNIQUE NOT NULL, role TEXT NOT NULL,
-          profile_complete INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS matches(id INTEGER PRIMARY KEY, round INTEGER NOT NULL,
-          team_a INTEGER NOT NULL, team_b INTEGER NOT NULL, problem_set INTEGER NOT NULL,
-          start_at REAL, end_at REAL, status TEXT NOT NULL DEFAULT 'pending');
-        CREATE TABLE IF NOT EXISTS solves(id INTEGER PRIMARY KEY, match_id INTEGER NOT NULL,
-          team_id INTEGER NOT NULL, user_id INTEGER NOT NULL, problem_id TEXT NOT NULL,
-          at REAL NOT NULL, win_points INTEGER NOT NULL, solve_points INTEGER NOT NULL,
-          UNIQUE(match_id, team_id, problem_id));
-        CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY, match_id INTEGER NOT NULL,
-          user_id INTEGER NOT NULL, problem_id TEXT NOT NULL, at REAL NOT NULL,
-          verdict TEXT NOT NULL, passed INTEGER NOT NULL, total INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS purchases(id INTEGER PRIMARY KEY, match_id INTEGER NOT NULL,
-          team_id INTEGER NOT NULL, user_id INTEGER NOT NULL, problem_id TEXT NOT NULL,
-          kind TEXT NOT NULL, detail TEXT NOT NULL, cost INTEGER NOT NULL, at REAL NOT NULL,
-          UNIQUE(match_id, team_id, problem_id, kind));
-        CREATE TABLE IF NOT EXISTS credits(id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL,
-          amount INTEGER NOT NULL, available_round INTEGER NOT NULL, reason TEXT NOT NULL,
-          at REAL NOT NULL);
-        CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS round_preferences(round INTEGER NOT NULL, team_id INTEGER NOT NULL,
-          user_id INTEGER NOT NULL, level INTEGER NOT NULL CHECK(level BETWEEN 1 AND 5),
-          PRIMARY KEY(round,user_id), UNIQUE(round,team_id,level));
-        CREATE TABLE IF NOT EXISTS round_assignments(round INTEGER NOT NULL, team_id INTEGER NOT NULL,
-          user_id INTEGER NOT NULL, level INTEGER NOT NULL CHECK(level BETWEEN 1 AND 5),
-          PRIMARY KEY(round,user_id), UNIQUE(round,team_id,level));
-        CREATE TABLE IF NOT EXISTS logo_candidates(team_id INTEGER NOT NULL, slot INTEGER NOT NULL,
-          source TEXT NOT NULL, data_uri TEXT NOT NULL, PRIMARY KEY(team_id,slot));
-        CREATE INDEX IF NOT EXISTS idx_credits_team_round ON credits(team_id,available_round);
-        CREATE INDEX IF NOT EXISTS idx_solves_match_problem ON solves(match_id,problem_id);
-        """)
-        if "profile_complete" not in {row[1] for row in c.execute("PRAGMA table_info(users)")}:
-            c.execute("ALTER TABLE users ADD COLUMN profile_complete INTEGER NOT NULL DEFAULT 0")
-            c.execute("UPDATE users SET profile_complete=1 WHERE role='admin'")
-        team_columns = {row[1] for row in c.execute("PRAGMA table_info(teams)")}
-        for column, definition in (("captain_user_id", "INTEGER"), ("logo_data", "TEXT"),
-                                   ("configured", "INTEGER NOT NULL DEFAULT 0"),
-                                   ("named", "INTEGER NOT NULL DEFAULT 0")):
-            if column not in team_columns:
-                c.execute(f"ALTER TABLE teams ADD COLUMN {column} {definition}")
-        if c.execute("SELECT 1 FROM users LIMIT 1").fetchone():
-            # Migrate fully enrolled teams from versions that did not have captains.
-            for team in c.execute("SELECT id FROM teams WHERE captain_user_id IS NULL"):
-                members = c.execute("SELECT id FROM users WHERE team_id=? AND profile_complete=1 ORDER BY id",
-                                    (team["id"],)).fetchall()
-                if len(members) == 5:
-                    c.execute("UPDATE teams SET captain_user_id=? WHERE id=?", (members[-1]["id"], team["id"]))
-            # Older prototypes stored 20-minute deadlines. Retain scores and
-            # accounts while shortening any currently open match on restart.
-            c.execute("""UPDATE matches SET end_at=start_at+?
-                WHERE status='open' AND start_at IS NOT NULL
-                  AND (end_at IS NULL OR ABS(end_at-start_at-?)>0.5)""",
-                      (ROUND_SECONDS, ROUND_SECONDS))
-            c.execute("""UPDATE matches SET end_at=MIN(start_at+?,?)
-                WHERE status='closed' AND start_at IS NOT NULL
-                  AND end_at>start_at+?+0.5""",
-                      (ROUND_SECONDS, time.time(), ROUND_SECONDS))
-            for m in c.execute("SELECT round,team_a,team_b FROM matches WHERE status!='pending'"):
-                for team in (m["team_a"], m["team_b"]):
-                    for player in c.execute("SELECT id,level FROM users WHERE team_id=?", (team,)):
-                        c.execute("""INSERT OR IGNORE INTO round_assignments(round,team_id,user_id,level)
-                            VALUES (?,?,?,?)""", (m["round"], team, player["id"], player["level"]))
-            r = current_round(c)
-            c.execute("UPDATE credits SET available_round=? WHERE amount>0 AND available_round=?",
-                      (r, r+1))
-            return
-        access = {"admin": None, "teams": {}}
-        token = access_token("admin")
-        c.execute("INSERT INTO users(name,team_id,level,token,role,profile_complete) VALUES (?,?,?,?,?,1)",
-                  ("운영자", None, None, token, "admin"))
-        access["admin"] = token
-        for team_id, name in enumerate(TEAM_NAMES, 1):
-            c.execute("INSERT INTO teams(id,name) VALUES (?,?)", (team_id, name))
-            access["teams"][name] = []
-            for level in range(1, 6):
-                t = access_token("player", team_id, level)
-                player = f"{name} {level}번"
-                c.execute("INSERT INTO users(name,team_id,level,token,role) VALUES (?,?,?,?,?)",
-                          (player, team_id, level, t, "player"))
-                access["teams"][name].append({"name": player, "level": level, "code": t})
-        for r, pairs in enumerate(ROUNDS, 1):
-            for a, b in pairs:
-                c.execute("INSERT INTO matches(round,team_a,team_b,problem_set) VALUES (?,?,?,?)",
-                          (r, a, b, (r - 1) % 3 + 1))
-        c.execute("INSERT INTO settings VALUES ('round','0')")
-        # Convenience credentials for the local organizer; never served by HTTP.
-        (DATA / "access.json").write_text(json.dumps(access, ensure_ascii=False, indent=2), encoding="utf-8")
-        try:
-            os.chmod(DATA / "access.json", 0o600)
-        except OSError:
-            pass
-        print("운영자 코드:", token, flush=True)
+        c.executescript('''
+        CREATE TABLE IF NOT EXISTS teams(id INTEGER PRIMARY KEY,name TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY,name TEXT NOT NULL,team_id INTEGER,level INTEGER,
+          token TEXT UNIQUE NOT NULL,role TEXT NOT NULL,profile_complete INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS matches(id INTEGER PRIMARY KEY,round INTEGER NOT NULL,team_a INTEGER NOT NULL,
+          team_b INTEGER NOT NULL,problem_set INTEGER NOT NULL,start_at REAL,end_at REAL,status TEXT NOT NULL DEFAULT 'pending');
+        CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS solves(id INTEGER PRIMARY KEY,match_id INTEGER NOT NULL,team_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,problem_id TEXT NOT NULL,at REAL NOT NULL,win_points INTEGER NOT NULL,
+          solve_points INTEGER NOT NULL,UNIQUE(match_id,team_id,problem_id));
+        CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY,match_id INTEGER NOT NULL,user_id INTEGER NOT NULL,
+          problem_id TEXT NOT NULL,at REAL NOT NULL,verdict TEXT NOT NULL,passed INTEGER NOT NULL,total INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS purchases(id INTEGER PRIMARY KEY,match_id INTEGER NOT NULL,team_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,problem_id TEXT NOT NULL,kind TEXT NOT NULL,detail TEXT NOT NULL,cost INTEGER NOT NULL,
+          at REAL NOT NULL,UNIQUE(match_id,team_id,problem_id,kind));
+        CREATE TABLE IF NOT EXISTS credits(id INTEGER PRIMARY KEY,team_id INTEGER NOT NULL,amount INTEGER NOT NULL,
+          available_round INTEGER NOT NULL,reason TEXT NOT NULL,at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS round_preferences(round INTEGER NOT NULL,team_id INTEGER NOT NULL,user_id INTEGER NOT NULL,
+          level INTEGER NOT NULL,PRIMARY KEY(round,user_id),UNIQUE(round,team_id,level));
+        CREATE TABLE IF NOT EXISTS round_assignments(round INTEGER NOT NULL,team_id INTEGER NOT NULL,user_id INTEGER NOT NULL,
+          level INTEGER NOT NULL,PRIMARY KEY(round,user_id),UNIQUE(round,team_id,level));
+        CREATE TABLE IF NOT EXISTS round_ready(round INTEGER NOT NULL,user_id INTEGER NOT NULL,ready INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(round,user_id));
+        CREATE TABLE IF NOT EXISTS drafts(match_id INTEGER NOT NULL,user_id INTEGER NOT NULL,code TEXT NOT NULL DEFAULT '',
+          rev INTEGER NOT NULL DEFAULT 0,updated_at REAL NOT NULL DEFAULT 0,freeze_until REAL NOT NULL DEFAULT 0,
+          cooldown_until REAL NOT NULL DEFAULT 0,PRIMARY KEY(match_id,user_id));
+        CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,match_id INTEGER,team_id INTEGER,user_id INTEGER,
+          kind TEXT NOT NULL,detail TEXT NOT NULL,at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS used_items(match_id INTEGER,user_id INTEGER,kind TEXT,at REAL,
+          PRIMARY KEY(match_id,user_id));
+        CREATE TABLE IF NOT EXISTS relays(match_id INTEGER,team_id INTEGER,input TEXT,output TEXT,level5_input TEXT,
+          PRIMARY KEY(match_id,team_id));
+        CREATE TABLE IF NOT EXISTS logo_candidates(team_id INTEGER NOT NULL,slot INTEGER NOT NULL,source TEXT NOT NULL,
+          data_uri TEXT NOT NULL,PRIMARY KEY(team_id,slot));
+        ''')
+        def columns(table,defs):
+            present={x[1] for x in c.execute(f'PRAGMA table_info({table})')}
+            for name,definition in defs.items():
+                if name not in present: c.execute(f'ALTER TABLE {table} ADD COLUMN {name} {definition}')
+        columns('teams',{'captain_user_id':'INTEGER','logo_data':'TEXT','configured':'INTEGER NOT NULL DEFAULT 0','named':'INTEGER NOT NULL DEFAULT 0'})
+        columns('users',{'profile_complete':'INTEGER NOT NULL DEFAULT 0','last_seen':'REAL NOT NULL DEFAULT 0'})
+        columns('matches',{'winner':'INTEGER','bonus':'INTEGER NOT NULL DEFAULT 0','settled':'INTEGER NOT NULL DEFAULT 0','reason':'TEXT'})
+        columns('submissions',{'code':"TEXT NOT NULL DEFAULT ''"})
+        if not c.execute('SELECT 1 FROM users').fetchone():
+            c.execute("INSERT INTO users(name,token,role,profile_complete) VALUES (?,?,?,1)",('운영자',access_token('admin'),'admin'))
+            for tid,name in enumerate(TEAM_NAMES,1):
+                c.execute('INSERT INTO teams(id,name) VALUES (?,?)',(tid,name))
+                for level in range(1,6):
+                    c.execute('INSERT INTO users(name,team_id,level,token,role) VALUES (?,?,?,?,?)',
+                              (f'{name} {level}번',tid,level,access_token('player',tid,level),'player'))
+            create_schedule(c); setval(c,'round',0)
+        if not setting(c,'phase'):
+            r=current_round(c)
+            opened=c.execute("SELECT 1 FROM matches WHERE round=? AND status='open'",(r,)).fetchone()
+            setval(c,'phase','live' if opened else 'results' if r else 'matching')
+        if not setting(c,'epoch'): setval(c,'epoch',secrets.token_hex(8))
+        c.execute("UPDATE matches SET problem_set=round WHERE status='pending' AND round<=5")
+        for t in c.execute('SELECT id FROM teams WHERE captain_user_id IS NULL'):
+            enrolled=list(c.execute('SELECT id FROM users WHERE team_id=? AND profile_complete=1 ORDER BY id',(t[0],)))
+            if len(enrolled)==5: c.execute('UPDATE teams SET captain_user_id=? WHERE id=?',(enrolled[-1][0],t[0]))
+        codes={'admin':c.execute("SELECT token FROM users WHERE role='admin'").fetchone()[0],'teams':{}}
+        for tid,name in enumerate(TEAM_NAMES,1):
+            codes['teams'][name]=[{'name':f'{name} {x["level"]}번','level':x['level'],'code':x['token']} for x in c.execute('SELECT * FROM users WHERE team_id=? ORDER BY level',(tid,))]
+        (DATA/'access.json').write_text(json.dumps(codes,ensure_ascii=False,indent=2),encoding='utf-8')
+        os.chmod(DATA/'access.json',0o600)
 
+def balance(c,team):
+    return c.execute('SELECT COALESCE(SUM(amount),0) FROM credits WHERE team_id=?',(team,)).fetchone()[0]
 
-def current_round(c):
-    return int(c.execute("SELECT value FROM settings WHERE key='round'").fetchone()[0])
-
-
-def credit_balance(c, team, round_no):
-    return c.execute("SELECT COALESCE(SUM(amount),0) FROM credits WHERE team_id=? AND available_round<=?",
-                     (team, round_no)).fetchone()[0]
-
+def points(c,mid,team):
+    return c.execute('SELECT COALESCE(SUM(win_points),0) FROM solves WHERE match_id=? AND team_id=?',(mid,team)).fetchone()[0]
 
 def standings(c):
-    rows = c.execute("""SELECT t.id,t.name,
-      COALESCE(SUM(s.win_points),0) AS points,
-      COUNT(s.id) AS solved FROM teams t
-      LEFT JOIN solves s ON t.id=s.team_id AND s.match_id IN
-        (SELECT id FROM matches WHERE round<=5)
-      GROUP BY t.id""").fetchall()
-    wins = {i: 0 for i in range(1, 6)}
-    for m in c.execute("SELECT * FROM matches WHERE round<=5 AND status='closed'"):
-        totals = [c.execute("SELECT COALESCE(SUM(win_points),0) FROM solves WHERE match_id=? AND team_id=?",
-                            (m["id"], team)).fetchone()[0] for team in (m["team_a"], m["team_b"])]
-        if totals[0] != totals[1]:
-            wins[(m["team_a"], m["team_b"])[totals[1] > totals[0]]] += 1
-    result = [dict(r) | {"wins": wins[r["id"]], "credit": credit_balance(c, r["id"], current_round(c))}
-              for r in rows]
-    return sorted(result, key=lambda x: (-x["points"], -x["wins"], -x["solved"], x["id"]))
+    result=[]
+    for t in c.execute('SELECT * FROM teams'):
+        solved=c.execute('SELECT COALESCE(SUM(win_points),0),COUNT(*) FROM solves WHERE team_id=? AND match_id IN (SELECT id FROM matches WHERE round<=5)',(t['id'],)).fetchone()
+        bonus=c.execute('SELECT COALESCE(SUM(bonus),0),COUNT(*) FROM matches WHERE round<=5 AND settled=1 AND winner=?',(t['id'],)).fetchone()
+        result.append({'id':t['id'],'name':t['name'],'logo':t['logo_data'],'points':solved[0]+bonus[0],
+                       'solved':solved[1],'wins':bonus[1],'credit':balance(c,t['id'])})
+    return sorted(result,key=lambda x:(-x['points'],-x['wins'],-x['solved'],x['id']))
+
+def event(c,m,team,user,kind,detail):
+    c.execute('INSERT INTO events(match_id,team_id,user_id,kind,detail,at) VALUES (?,?,?,?,?,?)',(m,team,user,kind,detail,time.time()))
+
+def close_match(c,m,winner=None,reason='time'):
+    if m['settled']: return
+    if m['round']<=5:
+        a,b=points(c,m['id'],m['team_a']),points(c,m['id'],m['team_b'])
+        winner=m['team_a'] if a>b else m['team_b'] if b>a else None
+    bonus=100 if m['round']<=5 and winner else 0
+    c.execute("UPDATE matches SET status='closed',end_at=MIN(COALESCE(end_at,?),?),winner=?,bonus=?,settled=1,reason=? WHERE id=?",
+              (time.time(),time.time(),winner,bonus,reason,m['id']))
+    event(c,m['id'],winner,None,'result','승리 팀 확정' if winner else '무승부')
+
+def tick(c):
+    if setting(c,'phase')!='live': return
+    r=current_round(c)
+    for m in list(c.execute("SELECT * FROM matches WHERE round=? AND status='open' AND end_at<=?",(r,time.time()))):
+        close_match(c,m)
+    if not c.execute("SELECT 1 FROM matches WHERE round=? AND status='open'",(r,)).fetchone():
+        setval(c,'phase','finished' if r==6 else 'results')
+
+def match_for(c,team,r):
+    return c.execute('SELECT * FROM matches WHERE round=? AND (team_a=? OR team_b=?)',(r,team,team)).fetchone()
+
+def target_round(c): return current_round(c)+1 if setting(c,'phase')=='matching' else current_round(c)
+
+def ensure_final(c):
+    if current_round(c)==5 and not c.execute('SELECT 1 FROM matches WHERE round=6').fetchone():
+        top=standings(c)[:2]
+        c.execute('INSERT INTO matches(round,team_a,team_b,problem_set) VALUES (6,?,?,6)',(top[0]['id'],top[1]['id']))
+
+def problem_for(m,team,level):
+    if m['round']==6: return LOOKUP[f'F{"A" if team==m["team_a"] else "B"}-L{level}']
+    return LOOKUP[f'S{m["problem_set"]}-L{level}']
+
+def assignment(c,m,user):
+    row=c.execute('SELECT level FROM round_assignments WHERE round=? AND user_id=?',(m['round'],user)).fetchone()
+    return row[0] if row else None
+
+def draft(c,mid,uid):
+    c.execute('INSERT OR IGNORE INTO drafts(match_id,user_id) VALUES (?,?)',(mid,uid))
+    return c.execute('SELECT * FROM drafts WHERE match_id=? AND user_id=?',(mid,uid)).fetchone()
+
+def public(p):
+    return public_problem(p)|{'reward':REWARD[p['level']], 'sample_input':judge_inputs(p)[0], 'sample_output':expected_outputs(p)[0]}
+
+def relay_problem(c,m,team,level):
+    p=dict(problem_for(m,team,level))
+    if m['round']==6 and level in (4,5):
+        r=c.execute('SELECT * FROM relays WHERE match_id=? AND team_id=?',(m['id'],team)).fetchone()
+        p['cases']=p['cases']+[r['input'] if level==4 else r['level5_input']]
+    return p
+
+def match_view(c,m,admin=False):
+    teams=[]
+    for tid in (m['team_a'],m['team_b']):
+        t=c.execute('SELECT * FROM teams WHERE id=?',(tid,)).fetchone()
+        members=[]
+        for u in c.execute('SELECT * FROM users WHERE team_id=? ORDER BY id',(tid,)):
+            row=c.execute('SELECT level FROM round_assignments WHERE round=? AND user_id=?',(m['round'],u['id'])).fetchone()
+            if not row: row=c.execute('SELECT level FROM round_preferences WHERE round=? AND user_id=?',(m['round'],u['id'])).fetchone()
+            ready=c.execute('SELECT ready FROM round_ready WHERE round=? AND user_id=?',(m['round'],u['id'])).fetchone()
+            s=c.execute('SELECT * FROM solves WHERE match_id=? AND user_id=?',(m['id'],u['id'])).fetchone()
+            last=c.execute('SELECT verdict,at FROM submissions WHERE match_id=? AND user_id=? ORDER BY id DESC LIMIT 1',(m['id'],u['id'])).fetchone()
+            d=c.execute('SELECT * FROM drafts WHERE match_id=? AND user_id=?',(m['id'],u['id'])).fetchone()
+            member={'id':u['id'],'name':u['name'] if u['profile_complete'] else '참가 전','level':row[0] if row else None,
+                    'ready':bool(ready and ready[0]),'enrolled':bool(u['profile_complete']),'online':time.time()-u['last_seen']<10,
+                    'captain':u['id']==t['captain_user_id'],'win_points':s['win_points'] if s else 0,
+                    'solved':bool(s),'verdict':last['verdict'].splitlines()[0] if last else '',
+                    'purchases':[dict(h) for h in c.execute('SELECT kind,cost,at FROM purchases WHERE match_id=? AND user_id=?',(m['id'],u['id']))],
+                    'item_used':bool(c.execute('SELECT 1 FROM used_items WHERE match_id=? AND user_id=?',(m['id'],u['id'])).fetchone()),
+                    'freeze_until':d['freeze_until'] if d else 0,'cooldown_until':d['cooldown_until'] if d else 0}
+            if admin: member['draft']=d['code'] if d else ''; member['updated_at']=d['updated_at'] if d else 0
+            members.append(member)
+        teams.append({'id':tid,'name':t['name'],'logo':f'/api/logo/{tid}' if t['logo_data'] else None,
+                      'configured':bool(t['configured']),'members':members,'points':points(c,m['id'],tid),
+                      'bonus':m['bonus'] if m['winner']==tid else 0,'credit':balance(c,tid)})
+    return dict(m)|{'teams':teams,'scores':{str(t['id']):t['points'] for t in teams}}
+
+def snapshot(c,user):
+    tick(c); r=current_round(c); phase=setting(c,'phase'); target=target_round(c)
+    if phase=='matching' and target==6: ensure_final(c)
+    matches=[match_view(c,m,user['role']=='admin') for m in c.execute('SELECT * FROM matches WHERE round=? ORDER BY id',(target,))]
+    t=c.execute('SELECT * FROM teams WHERE id=?',(user['team_id'],)).fetchone()
+    completed=c.execute('SELECT COUNT(*) FROM users WHERE team_id=? AND profile_complete=1',(user['team_id'],)).fetchone()[0]
+    m=match_for(c,user['team_id'],r) if user['role']=='player' and r else None
+    level=assignment(c,m,user['id']) if m else None
+    own_draft=dict(draft(c,m['id'],user['id'])) if m and level else None
+    p=public(problem_for(m,user['team_id'],level)) if m and level else None
+    hints=[dict(h) for h in c.execute('SELECT problem_id,kind,detail,cost FROM purchases WHERE match_id=? AND user_id=?',(m['id'],user['id']))] if m else []
+    solved=c.execute('SELECT * FROM solves WHERE match_id=? AND user_id=?',(m['id'],user['id'])).fetchone() if m else None
+    last=c.execute('SELECT verdict,passed,total,at FROM submissions WHERE match_id=? AND user_id=? ORDER BY id DESC LIMIT 1',(m['id'],user['id'])).fetchone() if m else None
+    relay=None
+    if m and m['round']==6 and c.execute("SELECT 1 FROM solves WHERE match_id=? AND team_id=? AND problem_id LIKE '%-L4'",(m['id'],user['team_id'])).fetchone():
+        rr=c.execute('SELECT output,level5_input FROM relays WHERE match_id=? AND team_id=?',(m['id'],user['team_id'])).fetchone()
+        relay=dict(rr) if rr else None
+    ev=[dict(e) for e in c.execute('SELECT * FROM events ORDER BY id DESC LIMIT 40')]
+    if user['role']!='admin':
+        ev=[e for e in ev if m and e['match_id']==m['id']]
+    return {'epoch':epoch(c),'server_time':time.time(),'phase':phase,'round':r,'target_round':target,
+            'api_check':dict(API_CHECK) if user['role']=='admin' else None,
+            'duration':600 if target==6 else 300,'matches':matches,'standings':standings(c),'costs':HINT_COST,'rewards':REWARD,
+            'me':{'id':user['id'],'name':user['name'],'role':user['role'],'team_id':user['team_id'],'level':level,
+                  'profile_complete':bool(user['profile_complete']),'is_captain':bool(t and t['captain_user_id']==user['id']),
+                  'captain_available':bool(t and not t['captain_user_id']),'force_captain':bool(t and not t['captain_user_id'] and completed==4)},
+            'team_setup':({'name':t['name'],'named':bool(t['named']),'complete':bool(t['configured']),
+               'candidates':[dict(x) for x in c.execute('SELECT slot,source FROM logo_candidates WHERE team_id=? ORDER BY slot',(t['id'],))],
+               'job':LOGO_JOBS.get(t['id'],{} )} if t else None),
+            'match':match_view(c,m) if m else None,'problem':p,'draft':own_draft,'solved':dict(solved) if solved else None,
+            'last_submission':dict(last) if last else None,'hints':hints,'relay':relay,'events':list(reversed(ev)),
+            'assist_enabled':bool(os.environ.get('OPENAI_API_KEY')),
+            'judge_enabled':judge_enabled(),'judge_provider':judge_provider(),
+            'item_available':bool(m and m['round']==6 and level in (1,2,3) and solved and not c.execute('SELECT 1 FROM used_items WHERE match_id=? AND user_id=?',(m['id'],user['id'])).fetchone())}
+
+def active_player(c,u):
+    if u['role']!='player': raise PermissionError('선수 계정으로 접속하세요.')
+    m=match_for(c,u['team_id'],current_round(c))
+    if setting(c,'phase')!='live' or not m or m['status']!='open' or time.time()>=m['end_at']: raise ValueError('현재 진행 중인 내 경기가 없습니다.')
+    level=assignment(c,m,u['id'])
+    if not level: raise ValueError('담당 레벨이 없습니다.')
+    return m,level,draft(c,m['id'],u['id'])
+
+def check_epoch(c,b):
+    if b.get('epoch')!=epoch(c): raise ValueError('대회가 초기화되었습니다. 화면을 새로고침하세요.')
+
+def check_freeze(d):
+    if d['freeze_until']>time.time(): raise ValueError('빙결 효과 중에는 코드 수정·제출을 할 수 없습니다.')
+
+def rename_variable(code):
+    tokens=[]
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(code).readline): tokens.append(tok)
+    except (tokenize.TokenError,IndentationError,SyntaxError): pass
+    assigned=set(); tree=None
+    try:
+        tree=ast.parse(code)
+        assigned={n.id for n in ast.walk(tree) if isinstance(n,ast.Name) and isinstance(n.ctx,ast.Store)}
+        assigned|={n.arg for n in ast.walk(tree) if isinstance(n,ast.arg)}
+    except SyntaxError: pass
+    lines=code.splitlines(keepends=True); offsets=[0]
+    for line in lines: offsets.append(offsets[-1]+len(line))
+    occurrences=[]
+    if tree is not None:
+        # AST positions include expressions inside f-strings; columns are UTF-8 byte offsets.
+        for node in ast.walk(tree):
+            name=node.id if isinstance(node,ast.Name) else node.arg if isinstance(node,ast.arg) else None
+            if name not in assigned: continue
+            col=len(lines[node.lineno-1].encode()[:node.col_offset].decode())
+            start=offsets[node.lineno-1]+col
+            occurrences.append((name,start,start+len(name)))
+    else:
+        filtered=[t for t in tokens if t.type not in (tokenize.ENCODING,tokenize.COMMENT,tokenize.NL,tokenize.NEWLINE,tokenize.INDENT,tokenize.DEDENT)]
+        for i,t in enumerate(filtered):
+            if t.type!=tokenize.NAME or keyword.iskeyword(t.string) or t.string in dir(builtins): continue
+            if i and filtered[i-1].string=='.': continue
+            if i+1<len(filtered) and filtered[i+1].string=='(': continue
+            occurrences.append((t.string,offsets[t.start[0]-1]+t.start[1],offsets[t.end[0]-1]+t.end[1]))
+    if not occurrences: return code,'변수 없음'
+    counts=Counter(n for n,_,_ in occurrences); target=sorted(counts,key=lambda x:(-counts[x],x))[0]
+    replacement=''.join(secrets.choice(string.ascii_letters) for _ in range(10))
+    while replacement in code: replacement=''.join(secrets.choice(string.ascii_letters) for _ in range(10))
+    for a,b in sorted({(a,b) for n,a,b in occurrences if n==target},reverse=True): code=code[:a]+replacement+code[b:]
+    return code,f'{target} → {replacement}'
+
+def erase_last_line(code):
+    lines=code.splitlines(keepends=True)
+    for i in range(len(lines)-1,-1,-1):
+        if lines[i].strip(): del lines[i]; break
+    return ''.join(lines)
+
+def start_round(c):
+    if setting(c,'phase')!='matching': raise ValueError('대진·준비 확인 단계에서 시작하세요.')
+    target=target_round(c)
+    matches=list(c.execute('SELECT * FROM matches WHERE round=?',(target,)))
+    if not matches: raise ValueError('시작할 대진이 없습니다.')
+    for m in matches:
+        for tid in (m['team_a'],m['team_b']):
+            t=c.execute('SELECT * FROM teams WHERE id=?',(tid,)).fetchone()
+            if not t['configured']: raise ValueError(f'{t["name"]} 팀명·로고 설정을 완료하세요.')
+            players=list(c.execute('SELECT * FROM users WHERE team_id=?',(tid,)))
+            if len(players)!=5 or any(not p['profile_complete'] or not c.execute('SELECT 1 FROM round_ready WHERE round=? AND user_id=? AND ready=1',(target,p['id'])).fetchone() for p in players):
+                raise ValueError(f'{t["name"]} 팀원 5명의 준비 완료가 필요합니다.')
+            picked=[(x['user_id'],x['level']) for x in c.execute('SELECT * FROM round_preferences WHERE round=? AND team_id=?',(target,tid))]
+            remain=[p['id'] for p in players if p['id'] not in {x[0] for x in picked}]; secrets.SystemRandom().shuffle(remain)
+            levels=[l for l in range(1,6) if l not in {x[1] for x in picked}]
+            for uid,l in picked+list(zip(remain,levels)):
+                c.execute('INSERT INTO round_assignments VALUES (?,?,?,?)',(target,tid,uid,l)); draft(c,m['id'],uid)
+            if target==6:
+                side=6 if tid==m['team_a'] else 7
+                case=relay_case(side,12,random.Random(secrets.randbits(64)))
+                p=dict(problem_for(m,tid,4)); p['cases']=[case]
+                out=expected_outputs(p)[0].strip().split(' ',1)[1]
+                values=out.split(); relay_in=f'{len(values)} 4\n'+out+'\n'
+                c.execute('INSERT INTO relays VALUES (?,?,?,?,?)',(m['id'],tid,case,out,relay_in))
+    now=time.time()
+    c.execute("UPDATE matches SET start_at=?,end_at=?,status='open' WHERE round=?",(now,now+(600 if target==6 else 300),target))
+    setval(c,'round',target); setval(c,'phase','live')
+
+def reset_all(c):
+    for table in ('solves','submissions','purchases','credits','round_preferences','round_assignments','round_ready','drafts','events','used_items','relays','logo_candidates','matches'):
+        c.execute(f'DELETE FROM {table}')
+    c.execute("UPDATE users SET profile_complete=0,last_seen=0 WHERE role='player'")
+    for tid,name in enumerate(TEAM_NAMES,1):
+        c.execute('UPDATE teams SET name=?,captain_user_id=NULL,logo_data=NULL,configured=0,named=0 WHERE id=?',(name,tid))
+        for u in list(c.execute('SELECT id,level FROM users WHERE team_id=?',(tid,))):
+            c.execute('UPDATE users SET name=? WHERE id=?',(f'{name} {u["level"]}번',u['id']))
+    create_schedule(c); setval(c,'round',0); setval(c,'phase','matching'); setval(c,'epoch',secrets.token_hex(8)); LOGO_JOBS.clear()
 
 
-def match_for(c, team, round_no):
-    return c.execute("SELECT * FROM matches WHERE round=? AND (team_a=? OR team_b=?)",
-                     (round_no, team, team)).fetchone()
-
-
-def eligible_teams(c, round_no):
-    if 1 <= round_no <= 5:
-        return {team for pair in ROUNDS[round_no-1] for team in pair}
-    if round_no == 6 and current_round(c) == 5:
-        rows = c.execute("SELECT status,end_at FROM matches WHERE round=5").fetchall()
-        if len(rows) == 2 and all(row["status"] == "closed" or (row["end_at"] or 0) <= time.time() for row in rows):
-            return {entry["id"] for entry in standings(c)[:2]}
-    return set()
-
-
-def assign_round(c, round_no):
-    """Freeze preferences, then randomly distribute all unclaimed levels."""
-    for match in c.execute("SELECT team_a,team_b FROM matches WHERE round=?", (round_no,)):
-        for team in (match["team_a"], match["team_b"]):
-            players = [row["id"] for row in c.execute("SELECT id FROM users WHERE team_id=? ORDER BY id", (team,))]
-            if len(players) != 5:
-                raise ValueError("팀당 선수가 정확히 5명이어야 합니다.")
-            picked = [(row["user_id"], row["level"]) for row in c.execute(
-                "SELECT user_id,level FROM round_preferences WHERE round=? AND team_id=?", (round_no, team))]
-            remaining_players = [user_id for user_id in players if user_id not in {p[0] for p in picked}]
-            remaining_levels = [level for level in range(1, 6) if level not in {p[1] for p in picked}]
-            secrets.SystemRandom().shuffle(remaining_players)
-            for user_id, level in picked + list(zip(remaining_players, remaining_levels)):
-                c.execute("""INSERT INTO round_assignments(round,team_id,user_id,level)
-                    VALUES (?,?,?,?)""", (round_no, team, user_id, level))
-
-
-def logo_candidates(team_name):
-    """Use the image API when configured; otherwise provide visibly provisional SVGs."""
-    key = os.environ.get("OPENAI_API_KEY")
-    if key:
-        payload = json.dumps({"model": os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-1"),
-                              "prompt": LOGO_PROMPT.format(name=team_name), "n": 3,
-                              "size": "1024x1024"}).encode()
-        request = urllib.request.Request("https://api.openai.com/v1/images/generations", data=payload,
-                                         headers={"Authorization": "Bearer " + key,
-                                                  "Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(request, timeout=120) as response:
-                images = json.load(response).get("data", [])
-            if len(images) != 3 or any(not x.get("b64_json") for x in images):
-                raise ValueError("로고 이미지 세 개를 받지 못했습니다.")
-            return [("AI 생성", "data:image/png;base64," + x["b64_json"]) for x in images]
-        except (urllib.error.URLError, ValueError) as exc:
-            raise ValueError("로고 생성에 실패했습니다. API 설정을 확인한 뒤 다시 시도하세요.") from exc
-    palette = [("#61d6ee", "#101f3d"), ("#ecb960", "#34304d"), ("#dc8bff", "#27334e")]
-    initial = html.escape(team_name[:2])
-    result = []
-    for index, (accent, shade) in enumerate(palette):
-        shapes = [f'<path d="M64 10 110 31 105 92 64 119 23 92 18 31Z" fill="{shade}" stroke="{accent}" stroke-width="5"/>',
-                  f'<path d="M64 13 111 45 94 110 34 110 17 45Z" fill="{shade}" stroke="{accent}" stroke-width="5"/>',
-                  f'<path d="M64 8 114 35 105 97 64 120 23 97 14 35Z" fill="{shade}" stroke="{accent}" stroke-width="5"/>']
-        svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">{shapes[index]}<text x="64" y="78" text-anchor="middle" font-family="sans-serif" font-weight="900" font-size="38" fill="{accent}">{initial}</text></svg>'
-        result.append(("임시 로고", "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()))
+def placeholders(name):
+    result=[]
+    for color in ('#58dfe0','#eebc63','#dd88fe'):
+        svg=f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><path d="M64 7 115 30 102 95 64 121 26 95 13 30Z" fill="#15213b" stroke="{color}" stroke-width="5"/><text x="64" y="78" text-anchor="middle" font-family="sans-serif" font-size="34" font-weight="bold" fill="{color}">{html.escape(name[:2])}</text></svg>'
+        result.append('data:image/svg+xml;base64,'+base64.b64encode(svg.encode()).decode())
     return result
 
-
-def snapshot(c, user):
-    r = current_round(c)
-    active = c.execute("SELECT * FROM matches WHERE round=? ORDER BY id", (r,)).fetchall()
-    own = match_for(c, user["team_id"], r) if user["role"] == "player" else None
-    m = own if own else None
-    assigned = c.execute("SELECT level FROM round_assignments WHERE round=? AND user_id=?",
-                         (r, user["id"])).fetchone() if m else None
-    level = assigned["level"] if assigned else None
-    picks = [public_problem(p) | {"reward": REWARD[p["level"]], "sample_input": judge_inputs(p)[0],
-                                    "sample_output": ANSWERS[p["id"]][0]}
-             for p in PROBLEMS if m and p["set"] == m["problem_set"] and
-             p["level"] == level]
-    teams = {row["id"]: dict(row) for row in c.execute("SELECT * FROM teams")}
-    def to_match(row):
-        return dict(row) | {"team_a_name": teams[row["team_a"]]["name"],
-                            "team_b_name": teams[row["team_b"]]["name"],
-                            "scores": {str(t): c.execute("SELECT COALESCE(SUM(win_points),0) FROM solves WHERE match_id=? AND team_id=?",
-                                                      (row["id"], t)).fetchone()[0] for t in (row["team_a"], row["team_b"])}}
-    solves = [dict(s) for s in c.execute("SELECT team_id,problem_id,win_points,at FROM solves WHERE match_id=? ORDER BY at", (m["id"],))] if m else []
-    hints = [dict(h) for h in c.execute("SELECT problem_id,kind,detail FROM purchases WHERE match_id=? AND team_id=?",
-                                        (m["id"], user["team_id"]))] if m else []
-    last_submission = None
-    if m and user["role"] == "player":
-        last = c.execute("""SELECT verdict,passed,total,at FROM submissions
-            WHERE match_id=? AND user_id=? AND problem_id=? ORDER BY id DESC LIMIT 1""",
-                         (m["id"], user["id"], f"S{m['problem_set']}-L{level}")).fetchone()
-        if last:
-            last_submission = dict(last)
-    next_round = r+1 if r < 6 else None
-    choices = None
-    if user["role"] == "player" and next_round and user["team_id"] in eligible_teams(c, next_round):
-        choices = {"round": next_round, "members": [dict(row) for row in c.execute("""SELECT u.id,u.name,p.level
-            FROM users u LEFT JOIN round_preferences p ON p.user_id=u.id AND p.round=?
-            WHERE u.team_id=? ORDER BY u.id""", (next_round, user["team_id"]))]}
-    team = teams.get(user["team_id"])
-    completed = c.execute("SELECT COUNT(*) FROM users WHERE team_id=? AND profile_complete=1",
-                          (user["team_id"],)).fetchone()[0] if team else 0
-    upcoming = match_for(c, user["team_id"], next_round) if team and next_round else None
-    if not upcoming and team and next_round == 6:
-        # Before finalists are known, leave the opponent undecided.
-        pass
-    lobby_match = to_match(upcoming) if upcoming else None
-    rosters = {}
-    for tid in ((user["team_id"],
-                 upcoming["team_b"] if upcoming["team_a"] == user["team_id"] else upcoming["team_a"])
-                if upcoming else (user["team_id"],)) if team else ():
-        rosters[str(tid)] = [{"id": x["id"], "name": x["name"] if x["profile_complete"] else "참가 전",
-                              "level": x["level"], "captain": x["id"] == teams[tid]["captain_user_id"],
-                              "selected_level": c.execute("SELECT level FROM round_preferences WHERE round=? AND user_id=?",
-                                                          (next_round, x["id"])).fetchone()[0]
-                              if next_round and c.execute("SELECT 1 FROM round_preferences WHERE round=? AND user_id=?",
-                                                          (next_round, x["id"])).fetchone() else None}
-                             for x in c.execute("SELECT * FROM users WHERE team_id=? ORDER BY id", (tid,))]
-    return {"me": {"id": user["id"], "name": user["name"], "team_id": user["team_id"],
-                   "level": level, "role": user["role"], "profile_complete": bool(user["profile_complete"]),
-                   "is_captain": bool(team and team["captain_user_id"] == user["id"]),
-                   "captain_available": bool(team and not team["captain_user_id"]),
-                   "force_captain": bool(team and not team["captain_user_id"] and completed == 4)},
-            "round": r, "match": to_match(m) if m else None, "matches": [to_match(x) for x in active],
-            "problems": picks, "solves": solves, "hints": hints, "last_submission": last_submission,
-            "standings": standings(c), "next_selection": choices,
-            "costs": HINT_COST, "rewards": REWARD, "duration": ROUND_SECONDS,
-            "team_setup": ({"name": team["name"], "named": bool(team["named"]),
-                            "complete": bool(team["configured"]), "logo": team["logo_data"],
-                            "candidates": [dict(row) for row in c.execute(
-                                "SELECT slot,source,data_uri FROM logo_candidates WHERE team_id=? ORDER BY slot",
-                                (user["team_id"],))] if team["captain_user_id"] == user["id"] else []}
-                           if team else None),
-            "next_match": lobby_match,
-            "lobby_teams": [{"id": tid, "name": teams[tid]["name"], "logo": teams[tid]["logo_data"],
-                             "roster": rosters[str(tid)]} for tid in map(int, rosters)],
-            "assist_enabled": bool(os.environ.get("OPENAI_API_KEY"))}
-
-
-def judge(code, problem):
-    if not isinstance(code, str) or not code.strip() or len(code) > 16000:
-        raise ValueError("코드를 입력하세요 (최대 16,000자).")
-    # No security boundary: only use with trusted participants on a local machine.
-    # subprocess timeout and resource limits prevent ordinary accidental hangs.
-    tests = judge_inputs(problem)
-    for i, (test, expected) in enumerate(zip(tests, ANSWERS[problem["id"]]), 1):
-        def limits():
-            try:
-                import resource
-                resource.setrlimit(resource.RLIMIT_CPU, (2, 2))
-                resource.setrlimit(resource.RLIMIT_AS, (256 * 1024**2, 256 * 1024**2))
-                resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
-                os.setsid()
-            except (ImportError, OSError, ValueError):
-                pass
-        try:
-            with tempfile.TemporaryDirectory() as temp:
-                result = subprocess.run([sys.executable, "-I", "-S", "-B", "-c", code],
-                                        input=test, text=True, capture_output=True, timeout=2.5,
-                                        cwd=temp, env={"PYTHONIOENCODING": "utf-8", "PATH": os.environ.get("PATH", "")},
-                                        preexec_fn=limits if os.name == "posix" else None)
-        except subprocess.TimeoutExpired:
-            return ("시간 초과", i - 1, len(tests))
-        if result.returncode:
-            return ("실행 오류 (종료 코드 " + str(result.returncode) + "):\n" +
-                    result.stderr[-4000:], i - 1, len(tests))
-        if len(result.stdout) > 20000:
-            return ("출력이 너무 깁니다", i - 1, len(tests))
-        actual_lines = [" ".join(line.split()) for line in result.stdout.strip().splitlines()]
-        expected_lines = [" ".join(line.split()) for line in expected.strip().splitlines()]
-        if actual_lines != expected_lines:
-            return ("오답", i - 1, len(tests))
-    return ("정답", len(tests), len(tests))
-
-
-def assist(problem, code):
-    key = os.environ.get("OPENAI_API_KEY")
-    if not key:
-        raise ValueError("AI 도움말을 사용하려면 서버에 OPENAI_API_KEY를 설정해야 합니다.")
-    if not isinstance(code, str) or not code.strip() or len(code) > 12000:
-        raise ValueError("현재 작성 중인 코드를 입력하세요 (최대 12,000자).")
-    prompt = ("한국어 알고리즘 튜터입니다. 다음 문제와 사용자의 Python 코드에 대해"
-              " 핵심 오류나 다음 단계만 3문장 이내로 조언하세요. 정답 코드, 전체 알고리즘 구현, 숨은 테스트 정답은 공개하지 마세요.\n"
-              f"문제: {problem['statement']}\n입력: {problem['input']}\n사용자 코드:\n{code}")
-    payload = json.dumps({"model": os.environ.get("OPENAI_MODEL", "gpt-4.1-mini"),
-                          "input": prompt, "store": False, "max_output_tokens": 250}).encode()
-    req = urllib.request.Request("https://api.openai.com/v1/responses", data=payload,
-                                 headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+def logo_worker(tid,name,generation,ep):
     try:
-        with urllib.request.urlopen(req, timeout=18) as response:
-            data = json.load(response)
-        return "\n".join(c.get("text", "") for item in data.get("output", [])
-                         for c in item.get("content", []) if c.get("type") == "output_text").strip()[:1500] or "응답이 비어 있습니다."
-    except (urllib.error.URLError, ValueError) as exc:
-        raise ValueError("AI 응답을 받지 못했습니다. 포인트는 차감되지 않았습니다.") from exc
-
+        images=create_logos(name)
+        with LOCK,db() as c:
+            t=c.execute('SELECT * FROM teams WHERE id=?',(tid,)).fetchone()
+            if epoch(c)!=ep or LOGO_JOBS.get(tid,{}).get('id')!=generation or not t or t['configured'] or t['name']!=name: return
+            for slot,img in enumerate(images,1):
+                c.execute('INSERT OR REPLACE INTO logo_candidates VALUES (?,?,?,?)',(tid,slot,'AI 생성',img))
+            LOGO_JOBS[tid]={'id':generation,'status':'done','started':LOGO_JOBS[tid]['started']}
+    except Exception as exc:
+        with LOCK:
+            if LOGO_JOBS.get(tid,{}).get('id')==generation:
+                LOGO_JOBS[tid]['status']='failed'
+                LOGO_JOBS[tid]['error']='API 생성 실패: '+str(exc)[:250]+' 임시 후보를 선택할 수 있습니다.'
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
-        pass
-
-    def send(self, obj, status=200):
-        data = json.dumps(obj, ensure_ascii=False).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.cors()
-        self.end_headers()
-        self.wfile.write(data)
-
+    def log_message(self,*args): pass
     def cors(self):
-        if FRONTEND_ORIGIN and self.headers.get("Origin") == FRONTEND_ORIGIN:
-            self.send_header("Access-Control-Allow-Origin", FRONTEND_ORIGIN)
-            self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-
+        if FRONTEND_ORIGIN and self.headers.get('Origin')==FRONTEND_ORIGIN:
+            self.send_header('Access-Control-Allow-Origin',FRONTEND_ORIGIN)
+            self.send_header('Vary','Origin')
+            self.send_header('Access-Control-Allow-Headers','Authorization,Content-Type')
+            self.send_header('Access-Control-Allow-Methods','GET,POST,OPTIONS')
+    def send(self,obj,status=200):
+        data=json.dumps(obj,ensure_ascii=False).encode(); self.send_response(status)
+        self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(data)))
+        self.send_header('Cache-Control','no-store'); self.cors(); self.end_headers(); self.wfile.write(data)
+    def user(self,c):
+        token=self.headers.get('Authorization','').removeprefix('Bearer ')
+        u=c.execute('SELECT * FROM users WHERE token=?',(token,)).fetchone()
+        if not u: raise PermissionError('참가 코드를 확인하세요.')
+        return u
     def do_OPTIONS(self):
-        if self.headers.get("Origin") != FRONTEND_ORIGIN or not FRONTEND_ORIGIN:
-            self.send({"error": "허용되지 않은 출처입니다."}, 403)
-            return
-        self.send_response(204)
-        self.cors()
-        self.end_headers()
-
-    def user(self, c):
-        token = self.headers.get("Authorization", "").removeprefix("Bearer ")
-        user = c.execute("SELECT * FROM users WHERE token=?", (token,)).fetchone()
-        if not user:
-            raise PermissionError("참가 코드를 확인하세요.")
-        return user
-
+        if not FRONTEND_ORIGIN or self.headers.get('Origin')!=FRONTEND_ORIGIN: return self.send({'error':'허용되지 않은 출처'},403)
+        self.send_response(204); self.cors(); self.end_headers()
     def do_GET(self):
-        path = urlparse(self.path).path
-        if path == "/api/state":
-            try:
-                with db() as c:
-                    self.send(snapshot(c, self.user(c)))
-            except PermissionError as e:
-                self.send({"error": str(e)}, 401)
-            return
-        target = ROOT / "static" / ("index.html" if path == "/" else path.lstrip("/"))
-        if target.parent != ROOT / "static" or target.suffix not in (".html", ".css", ".js", ".svg") or not target.exists():
-            self.send({"error": "찾을 수 없습니다."}, 404)
-            return
-        data = target.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
-                                          ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml"}[target.suffix])
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(data)
-
-    def do_POST(self):
-        received_at = time.time()
+        parsed=urlparse(self.path); path=parsed.path
         try:
-            size = int(self.headers.get("Content-Length", 0))
-            if not 0 < size < 40000:
-                raise ValueError("요청 크기가 잘못되었습니다.")
-            body = json.loads(self.rfile.read(size))
-            path = urlparse(self.path).path
-            if path == "/api/team/logos":
-                # Image requests can take a minute; do not hold the database lock during the API call.
-                with LOCK, db() as c:
-                    user = self.user(c)
-                    team = c.execute("SELECT * FROM teams WHERE id=?", (user["team_id"],)).fetchone()
-                    if not team or team["captain_user_id"] != user["id"] or not team["named"]:
-                        raise PermissionError("팀명 설정을 마친 팀장만 로고를 만들 수 있습니다.")
-                    existing = c.execute("SELECT 1 FROM logo_candidates WHERE team_id=?", (team["id"],)).fetchone()
-                    name = team["name"]
-                if not existing:
-                    logos = logo_candidates(name)
-                    with LOCK, db() as c:
-                        team = c.execute("SELECT name FROM teams WHERE id=?", (user["team_id"],)).fetchone()
-                        if team and team["name"] == name:
-                            for slot, (source, image) in enumerate(logos, 1):
-                                c.execute("INSERT OR IGNORE INTO logo_candidates VALUES (?,?,?,?)",
-                                          (user["team_id"], slot, source, image))
+            if path.startswith('/api/logo/'):
+                tid=int(path.rsplit('/',1)[1]); slot=parse_qs(parsed.query).get('slot',[None])[0]
                 with db() as c:
-                    self.send(snapshot(c, self.user(c)))
-                return
-            with LOCK, db() as c:
-                user = self.user(c)
-                if path == "/api/admin/advance":
-                    if user["role"] != "admin":
-                        raise PermissionError("운영자만 진행할 수 있습니다.")
-                    r = current_round(c)
-                    if r >= 6:
-                        raise ValueError("결승이 이미 종료되었습니다.")
-                    c.execute("""UPDATE matches SET status='closed',end_at=MIN(end_at,?)
-                        WHERE round=? AND status='open'""", (time.time(), r))
-                    if r == 5:
-                        top = standings(c)[:2]
-                        c.execute("INSERT INTO matches(round,team_a,team_b,problem_set) VALUES (6,?,?,3)",
-                                  (top[0]["id"], top[1]["id"]))
-                    r += 1
-                    assign_round(c, r)
-                    now = time.time()
-                    c.execute("UPDATE matches SET start_at=?,end_at=?,status='open' WHERE round=?",
-                              (now, now + ROUND_SECONDS, r))
-                    c.execute("UPDATE settings SET value=? WHERE key='round'", (str(r),))
-                    c.commit()
-                    self.send(snapshot(c, user))
-                    return
-                if path == "/api/admin/close":
-                    if user["role"] != "admin":
-                        raise PermissionError("운영자만 진행할 수 있습니다.")
-                    r = current_round(c)
-                    c.execute("""UPDATE matches SET status='closed',end_at=MIN(end_at,?)
-                        WHERE round=? AND status='open'""", (time.time(), r))
-                    c.commit()
-                    self.send(snapshot(c, user))
-                    return
-                if user["role"] != "player":
-                    raise PermissionError("선수 계정으로 접속하세요.")
-                if path == "/api/profile":
-                    if user["profile_complete"]:
-                        raise ValueError("이미 이름을 설정했습니다.")
-                    name = body.get("name")
-                    if not isinstance(name, str):
-                        raise ValueError("이름을 입력하세요.")
-                    name = " ".join(name.split())
-                    if not 2 <= len(name) <= 20 or not all(ch.isalnum() or ch in " _-" for ch in name):
-                        raise ValueError("이름은 2~20자의 문자, 숫자, 공백, _ 또는 -만 사용할 수 있습니다.")
-                    if c.execute("SELECT 1 FROM users WHERE team_id=? AND name=? AND id!=?",
-                                 (user["team_id"], name, user["id"])).fetchone():
-                        raise ValueError("팀 안에 같은 이름을 사용하는 선수가 있습니다.")
-                    team = c.execute("SELECT captain_user_id FROM teams WHERE id=?", (user["team_id"],)).fetchone()
-                    count = c.execute("SELECT COUNT(*) FROM users WHERE team_id=? AND profile_complete=1",
-                                      (user["team_id"],)).fetchone()[0]
-                    wants_captain = body.get("captain", False)
-                    if type(wants_captain) is not bool:
-                        raise ValueError("팀장 선택 값이 잘못되었습니다.")
-                    if wants_captain and team["captain_user_id"]:
-                        raise ValueError("이미 팀장이 정해졌습니다. 화면을 새로고침하세요.")
-                    if not team["captain_user_id"] and (wants_captain or count == 4):
-                        c.execute("UPDATE teams SET captain_user_id=? WHERE id=?", (user["id"], user["team_id"]))
-                    c.execute("UPDATE users SET name=?,profile_complete=1 WHERE id=?", (name, user["id"]))
-                    c.commit()
-                    self.send(snapshot(c, self.user(c)))
-                    return
-                if not user["profile_complete"]:
-                    raise ValueError("먼저 선수 이름을 설정하세요.")
-                if path == "/api/team/name":
-                    team = c.execute("SELECT * FROM teams WHERE id=?", (user["team_id"],)).fetchone()
-                    if team["captain_user_id"] != user["id"] or team["configured"]:
-                        raise PermissionError("팀명은 대기실에 들어가기 전 팀장만 정할 수 있습니다.")
-                    name = body.get("name")
-                    if not isinstance(name, str):
-                        raise ValueError("팀명을 입력하세요.")
-                    name = " ".join(name.split())
-                    if not 2 <= len(name) <= 24 or not all(ch.isalnum() or ch in " _-" for ch in name):
-                        raise ValueError("팀명은 2~24자의 문자, 숫자, 공백, _ 또는 -만 사용할 수 있습니다.")
-                    if c.execute("SELECT 1 FROM teams WHERE name=? AND id!=?", (name, user["team_id"])).fetchone():
-                        raise ValueError("다른 팀에서 이미 사용하는 이름입니다.")
-                    if name != team["name"]:
-                        c.execute("DELETE FROM logo_candidates WHERE team_id=?", (user["team_id"],))
-                    c.execute("UPDATE teams SET name=?,named=1 WHERE id=?", (name, user["team_id"]))
-                    c.commit()
-                    self.send(snapshot(c, user))
-                    return
-                if path == "/api/team/choose-logo":
-                    team = c.execute("SELECT * FROM teams WHERE id=?", (user["team_id"],)).fetchone()
-                    if team["captain_user_id"] != user["id"] or not team["named"] or team["configured"]:
-                        raise PermissionError("팀장만 준비된 로고를 선택할 수 있습니다.")
-                    slot = body.get("slot")
-                    if type(slot) is not int or slot not in (1, 2, 3):
-                        raise ValueError("로고 후보 세 개 중 하나를 선택하세요.")
-                    chosen = c.execute("SELECT data_uri FROM logo_candidates WHERE team_id=? AND slot=?",
-                                       (user["team_id"], slot)).fetchone()
-                    if not chosen:
-                        raise ValueError("먼저 로고 후보를 생성하세요.")
-                    c.execute("UPDATE teams SET logo_data=?,configured=1 WHERE id=?",
-                              (chosen[0], user["team_id"]))
-                    c.execute("DELETE FROM logo_candidates WHERE team_id=?", (user["team_id"],))
-                    c.commit()
-                    self.send(snapshot(c, user))
-                    return
-                if path == "/api/selection":
-                    next_round = current_round(c) + 1
-                    if user["team_id"] not in eligible_teams(c, next_round):
-                        raise ValueError("현재는 다음 라운드 레벨을 선택할 수 없습니다.")
-                    level = body.get("level")
-                    if level is not None and (type(level) is not int or level not in REWARD):
-                        raise ValueError("레벨 1~5 중에서 선택하세요.")
-                    c.execute("DELETE FROM round_preferences WHERE round=? AND user_id=?",
-                              (next_round, user["id"]))
-                    if level is not None:
-                        if c.execute("SELECT 1 FROM round_preferences WHERE round=? AND team_id=? AND level=?",
-                                     (next_round, user["team_id"], level)).fetchone():
-                            raise ValueError("팀원이 이미 선택한 레벨입니다. 다른 레벨을 선택하세요.")
-                        c.execute("INSERT INTO round_preferences(round,team_id,user_id,level) VALUES (?,?,?,?)",
-                                  (next_round, user["team_id"], user["id"], level))
-                    c.commit()
-                    self.send(snapshot(c, user))
-                    return
-                r = current_round(c)
-                match = match_for(c, user["team_id"], r)
-                if not match or match["status"] != "open" or not match["start_at"] <= time.time() < match["end_at"]:
-                    raise ValueError("현재 진행 중인 내 경기가 없습니다.")
-                assignment = c.execute("SELECT level FROM round_assignments WHERE round=? AND user_id=?",
-                                       (r, user["id"])).fetchone()
-                if not assignment:
-                    raise ValueError("이번 라운드에 문제 레벨이 배정되지 않았습니다.")
-                level = assignment["level"]
-                pid = f"S{match['problem_set']}-L{level}"
-                problem = LOOKUP[pid]
-                if path == "/api/submit":
-                    if os.environ.get("HOST", "127.0.0.1") not in ("127.0.0.1", "localhost"):
-                        raise ValueError("공개 서버의 코드 실행은 격리 채점기 연결 전까지 비활성화됩니다. README를 확인하세요.")
-                    verdict, passed, total = judge(body.get("code"), problem)
-                    now = received_at
-                    if now >= match["end_at"]:
-                        raise ValueError("경기 종료 후 제출은 점수에 반영되지 않습니다.")
-                    c.execute("INSERT INTO submissions(match_id,user_id,problem_id,at,verdict,passed,total) VALUES (?,?,?,?,?,?,?)",
-                              (match["id"], user["id"], pid, now, verdict[:5000], passed, total))
-                    points = 0
-                    if verdict == "정답":
-                        previous = c.execute("SELECT 1 FROM solves WHERE match_id=? AND problem_id=?",
-                                             (match["id"], pid)).fetchone()
-                        points = REWARD[level] // 2 if previous else REWARD[level]
-                        c.execute("INSERT OR IGNORE INTO solves(match_id,team_id,user_id,problem_id,at,win_points,solve_points) VALUES (?,?,?,?,?,?,?)",
-                                  (match["id"], user["team_id"], user["id"], pid, now, points, REWARD[level]))
-                        if c.execute("SELECT changes()").fetchone()[0]:
-                            c.execute("INSERT INTO credits(team_id,amount,available_round,reason,at) VALUES (?,?,?,?,?)",
-                                      (user["team_id"], REWARD[level], r, f"{pid} 정답", now))
-                        else:
-                            points = 0
-                    c.commit()
-                    self.send({"verdict": verdict, "passed": passed, "total": total, "win_points": points,
-                               "state": snapshot(c, user)})
-                    return
-                if path == "/api/hint":
-                    kind = body.get("kind")
-                    if kind not in HINT_COST:
-                        raise ValueError("힌트 종류가 잘못되었습니다.")
-                    existing = c.execute("SELECT detail FROM purchases WHERE match_id=? AND team_id=? AND problem_id=? AND kind=?",
-                                         (match["id"], user["team_id"], pid, kind)).fetchone()
-                    if existing:
-                        self.send({"detail": existing[0], "state": snapshot(c, user)})
-                        return
-                    cost = HINT_COST[kind]
-                    if credit_balance(c, user["team_id"], r) < cost:
-                        raise ValueError("사용 가능한 solve포인트가 부족합니다. 팀원이 정답을 맞히면 즉시 사용할 수 있습니다.")
-                    if kind == "assist":
-                        detail = assist(problem, body.get("code"))
+                    row=c.execute('SELECT data_uri FROM logo_candidates WHERE team_id=? AND slot=?',(tid,int(slot))).fetchone() if slot else c.execute('SELECT logo_data FROM teams WHERE id=?',(tid,)).fetchone()
+                    if not row or not row[0]: return self.send({'error':'로고 없음'},404)
+                    header,data=row[0].split(',',1); binary=base64.b64decode(data)
+                self.send_response(200); self.send_header('Content-Type',header[5:].split(';')[0]); self.send_header('Content-Length',str(len(binary))); self.send_header('Cache-Control','no-store'); self.cors(); self.end_headers(); self.wfile.write(binary); return
+            if path in ('/api/state','/api/inspect'):
+                with LOCK,db() as c:
+                    u=self.user(c); tick(c); c.execute('UPDATE users SET last_seen=? WHERE id=?',(time.time(),u['id']))
+                    if path=='/api/state': result=snapshot(c,u)
                     else:
-                        detail = problem["hint1"] if kind == "type" else problem["hint2"]
-                    now = time.time()
-                    c.execute("INSERT INTO purchases(match_id,team_id,user_id,problem_id,kind,detail,cost,at) VALUES (?,?,?,?,?,?,?,?)",
-                              (match["id"], user["team_id"], user["id"], pid, kind, detail, cost, now))
-                    c.execute("INSERT INTO credits(team_id,amount,available_round,reason,at) VALUES (?,?,?,?,?)",
-                              (user["team_id"], -cost, r, f"{pid} {kind} 힌트", now))
-                    c.commit()
-                    self.send({"detail": detail, "state": snapshot(c, user)})
-                    return
-                self.send({"error": "찾을 수 없습니다."}, 404)
-        except PermissionError as exc:
-            self.send({"error": str(exc)}, 403)
-        except (ValueError, TypeError, json.JSONDecodeError) as exc:
-            self.send({"error": str(exc)}, 400)
-        except Exception as exc:
-            print("서버 오류:", repr(exc), file=sys.stderr)
-            self.send({"error": "서버 처리 중 오류가 발생했습니다."}, 500)
+                        if u['role']!='admin': raise PermissionError('운영자만 볼 수 있습니다.')
+                        uid=int(parse_qs(parsed.query).get('user_id',['0'])[0]); player=c.execute("SELECT * FROM users WHERE id=? AND role='player'",(uid,)).fetchone()
+                        m=match_for(c,player['team_id'],current_round(c)) if player else None
+                        l=assignment(c,m,uid) if m else None
+                        if not l: raise ValueError('진행한 경기의 담당 문제가 없습니다.')
+                        accepted=c.execute("SELECT code FROM submissions WHERE match_id=? AND user_id=? AND verdict='정답' ORDER BY id LIMIT 1",(m['id'],uid)).fetchone()
+                        last=c.execute('SELECT code,verdict FROM submissions WHERE match_id=? AND user_id=? ORDER BY id DESC LIMIT 1',(m['id'],uid)).fetchone()
+                        result={'name':player['name'],'problem':public(problem_for(m,player['team_id'],l)),
+                                'draft':dict(draft(c,m['id'],uid)),'accepted_code':accepted[0] if accepted else None,'last':dict(last) if last else None}
+                return self.send(result)
+            target=ROOT/'static'/('index.html' if path=='/' else path.lstrip('/'))
+            if target.parent!=ROOT/'static' or target.suffix not in ('.html','.css','.js','.svg') or not target.exists(): return self.send({'error':'찾을 수 없습니다.'},404)
+            data=target.read_bytes(); self.send_response(200); self.send_header('Content-Type',{'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml'}[target.suffix]+'; charset=utf-8'); self.send_header('Content-Length',str(len(data))); self.send_header('Cache-Control','no-store'); self.end_headers(); self.wfile.write(data)
+        except PermissionError as e: self.send({'error':str(e)},401)
+        except (ValueError,TypeError) as e: self.send({'error':str(e)},400)
+        except Exception as e:
+            print(repr(e),file=sys.stderr); self.send({'error':'서버 처리 중 오류'},500)
+    def do_POST(self):
+        try:
+            n=int(self.headers.get('Content-Length',0))
+            if not 0<n<100000: raise ValueError('요청 크기가 잘못되었습니다.')
+            b=json.loads(self.rfile.read(n)); path=urlparse(self.path).path
+            if not isinstance(b,dict): raise ValueError('JSON 객체가 필요합니다.')
+            if path=='/api/submit': return self.submit_code(b)
+            if path=='/api/hint' and b.get('kind')=='assist': return self.ai_hint(b)
+            with LOCK,db() as c:
+                u=self.user(c); tick(c)
+                if path.startswith('/api/admin/'):
+                    if u['role']!='admin': raise PermissionError('운영자만 사용할 수 있습니다.')
+                    check_epoch(c,b)
+                    if path=='/api/admin/api-check':
+                        if setting(c,'phase')=='live': raise ValueError('연결 시험은 경기 시작 전에 실행하세요.')
+                        if API_CHECK.get('status')=='running': raise ValueError('연결 시험이 이미 진행 중입니다.')
+                        if judge_provider()!='openai' or not judge_enabled(): raise ValueError('JUDGE_PROVIDER=openai 및 OPENAI_API_KEY를 설정하세요.')
+                        API_CHECK.clear(); API_CHECK.update(status='running',results=[],started=time.time())
+                        threading.Thread(target=api_check_worker,daemon=True).start()
+                    elif path=='/api/admin/start': start_round(c)
+                    elif path=='/api/admin/close':
+                        if setting(c,'phase')!='live': raise ValueError('진행 중인 라운드가 없습니다.')
+                        for m in list(c.execute("SELECT * FROM matches WHERE round=? AND status='open'",(current_round(c),))): close_match(c,m,reason='admin')
+                        tick(c)
+                    elif path=='/api/admin/next':
+                        if setting(c,'phase')!='results' or current_round(c)>=6: raise ValueError('결과 확인 단계에서 다음 대진을 열어주세요.')
+                        if current_round(c)==5: ensure_final(c)
+                        setval(c,'phase','matching')
+                    elif path=='/api/admin/reset':
+                        if b.get('confirmation')!='전체 초기화': raise ValueError('전체 초기화를 정확히 입력하세요.')
+                        reset_all(c)
+                    else: raise ValueError('지원하지 않는 운영 명령입니다.')
+                elif path=='/api/profile':
+                    if u['role']!='player' or u['profile_complete']: raise ValueError('이미 이름을 설정했습니다.')
+                    name=valid_name(b.get('name'),20)
+                    if c.execute('SELECT 1 FROM users WHERE team_id=? AND name=? AND id!=?',(u['team_id'],name,u['id'])).fetchone(): raise ValueError('팀 안에 같은 이름이 있습니다.')
+                    t=c.execute('SELECT * FROM teams WHERE id=?',(u['team_id'],)).fetchone()
+                    count=c.execute('SELECT COUNT(*) FROM users WHERE team_id=? AND profile_complete=1',(u['team_id'],)).fetchone()[0]
+                    if b.get('captain') and t['captain_user_id']: raise ValueError('이미 팀장이 정해졌습니다.')
+                    if not t['captain_user_id'] and (b.get('captain') or count==4): c.execute('UPDATE teams SET captain_user_id=? WHERE id=?',(u['id'],u['team_id']))
+                    c.execute('UPDATE users SET name=?,profile_complete=1 WHERE id=?',(name,u['id']))
+                elif path.startswith('/api/team/'):
+                    t=c.execute('SELECT * FROM teams WHERE id=?',(u['team_id'],)).fetchone()
+                    if not t or t['captain_user_id']!=u['id'] or t['configured']: raise PermissionError('팀 설정 중인 팀장만 사용할 수 있습니다.')
+                    if path=='/api/team/name':
+                        name=valid_name(b.get('name'),24)
+                        if c.execute('SELECT 1 FROM teams WHERE id!=? AND name=?',(t['id'],name)).fetchone(): raise ValueError('다른 팀이 사용하는 팀명입니다.')
+                        if t['name']!=name:
+                            c.execute('DELETE FROM logo_candidates WHERE team_id=?',(t['id'],)); LOGO_JOBS.pop(t['id'],None)
+                        c.execute('UPDATE teams SET name=?,named=1 WHERE id=?',(name,t['id']))
+                    elif path=='/api/team/logos':
+                        if not t['named']: raise ValueError('먼저 팀명을 저장하세요.')
+                        if not c.execute('SELECT 1 FROM logo_candidates WHERE team_id=?',(t['id'],)).fetchone():
+                            for slot,image in enumerate(placeholders(t['name']),1): c.execute('INSERT INTO logo_candidates VALUES (?,?,?,?)',(t['id'],slot,'임시 로고',image))
+                        if os.environ.get('OPENAI_API_KEY') and t['id'] not in LOGO_JOBS:
+                            gen=secrets.token_hex(8); ep=epoch(c)
+                            LOGO_JOBS[t['id']]={'id':gen,'status':'running','started':time.time()}
+                            threading.Thread(target=logo_worker,args=(t['id'],t['name'],gen,ep),daemon=True).start()
+                    elif path=='/api/team/choose-logo':
+                        row=c.execute('SELECT data_uri FROM logo_candidates WHERE team_id=? AND slot=?',(t['id'],b.get('slot'))).fetchone()
+                        if not row: raise ValueError('로고 후보를 선택하세요.')
+                        c.execute('UPDATE teams SET logo_data=?,configured=1 WHERE id=?',(row[0],t['id']))
+                    else: raise ValueError('팀 설정 경로 오류')
+                elif path in ('/api/selection','/api/ready'):
+                    check_epoch(c,b)
+                    if not u['profile_complete'] or setting(c,'phase')!='matching': raise ValueError('대진 확인 단계에서 이름을 설정한 후 준비하세요.')
+                    target=target_round(c); m=match_for(c,u['team_id'],target)
+                    if not m: raise ValueError('이번 라운드는 휴식입니다.')
+                    if path=='/api/selection':
+                        level=b.get('level')
+                        if level is not None and (type(level)!=int or level not in REWARD): raise ValueError('레벨 1~5를 선택하세요.')
+                        c.execute('DELETE FROM round_preferences WHERE round=? AND user_id=?',(target,u['id']))
+                        if level:
+                            if c.execute('SELECT 1 FROM round_preferences WHERE round=? AND team_id=? AND level=?',(target,u['team_id'],level)).fetchone(): raise ValueError('팀원이 이미 선택한 레벨입니다.')
+                            c.execute('INSERT INTO round_preferences VALUES (?,?,?,?)',(target,u['team_id'],u['id'],level))
+                        c.execute('INSERT OR REPLACE INTO round_ready VALUES (?,?,0)',(target,u['id']))
+                    else: c.execute('INSERT OR REPLACE INTO round_ready VALUES (?,?,?)',(target,u['id'],int(bool(b.get('ready')))))
+                elif path=='/api/draft':
+                    check_epoch(c,b); m,l,d=active_player(c,u); check_freeze(d)
+                    if b.get('match_id')!=m['id']: raise ValueError('경기가 변경되었습니다.')
+                    if b.get('rev')!=d['rev']: return self.send({'conflict':True,'draft':dict(d)},409)
+                    code=valid_code(b.get('code'),allow_empty=True)
+                    c.execute('UPDATE drafts SET code=?,rev=rev+1,updated_at=? WHERE match_id=? AND user_id=?',(code,time.time(),m['id'],u['id']))
+                    c.commit(); return self.send({'draft':dict(draft(c,m['id'],u['id']))})
+                elif path=='/api/item':
+                    check_epoch(c,b); m,l,d=active_player(c,u)
+                    if m['round']!=6 or l not in (1,2,3): raise ValueError('결승 레벨 1~3만 아이템을 사용합니다.')
+                    if not c.execute('SELECT 1 FROM solves WHERE match_id=? AND user_id=?',(m['id'],u['id'])).fetchone(): raise ValueError('문제 정답을 먼저 제출하세요.')
+                    if c.execute('SELECT 1 FROM used_items WHERE match_id=? AND user_id=?',(m['id'],u['id'])).fetchone(): raise ValueError('이미 사용한 아이템입니다.')
+                    opponent=m['team_b'] if m['team_a']==u['team_id'] else m['team_a']
+                    kind={1:'freeze',2:'rename',3:'erase'}[l]
+                    for target in c.execute('SELECT user_id,level FROM round_assignments WHERE round=6 AND team_id=?',(opponent,)):
+                        if l!=1 and target['level'] not in (4,5): continue
+                        td=draft(c,m['id'],target['user_id']); code=td['code']
+                        if l==1: c.execute('UPDATE drafts SET freeze_until=MAX(freeze_until,?),rev=rev+1 WHERE match_id=? AND user_id=?',(time.time()+20,m['id'],target['user_id']))
+                        else:
+                            detail='마지막 코드 줄 삭제'
+                            if l==2: code,detail=rename_variable(code)
+                            else: code=erase_last_line(code)
+                            c.execute('UPDATE drafts SET code=?,rev=rev+1,updated_at=? WHERE match_id=? AND user_id=?',(code,time.time(),m['id'],target['user_id']))
+                    c.execute('INSERT INTO used_items VALUES (?,?,?,?)',(m['id'],u['id'],kind,time.time()))
+                    event(c,m['id'],opponent,u['id'],kind,{1:'상대 팀 20초 빙결',2:'상대 Lv4·5 변수 교란',3:'상대 Lv4·5 마지막 줄 삭제'}[l])
+                elif path=='/api/hint':
+                    check_epoch(c,b); m,l,d=active_player(c,u); check_freeze(d)
+                    kind=b.get('kind'); p=problem_for(m,u['team_id'],l)
+                    if kind not in ('type','structure'): raise ValueError('힌트 종류 오류')
+                    purchase(c,u,m,p,kind,p['hint1'] if kind=='type' else p['hint2'])
+                else: raise ValueError('지원하지 않는 요청입니다.')
+                c.commit(); result=snapshot(c,self.user(c))
+            self.send(result)
+        except PermissionError as e: self.send({'error':str(e)},403)
+        except (ValueError,TypeError,sqlite3.IntegrityError) as e: self.send({'error':str(e)},400)
+        except Exception as e:
+            print(repr(e),file=sys.stderr); self.send({'error':'서버 처리 중 오류'},500)
+    def submit_code(self,b):
+        with LOCK,db() as c:
+            u=self.user(c); tick(c); check_epoch(c,b); m,l,d=active_player(c,u); check_freeze(d)
+            if d['cooldown_until']>time.time(): raise ValueError('재제출 대기시간이 남아 있습니다.')
+            if c.execute('SELECT 1 FROM solves WHERE match_id=? AND user_id=?',(m['id'],u['id'])).fetchone(): raise ValueError('이미 해결한 문제입니다.')
+            if m['round']==6 and l==5 and not c.execute("SELECT 1 FROM solves WHERE match_id=? AND team_id=? AND problem_id LIKE '%-L4'",(m['id'],u['team_id'])).fetchone(): raise ValueError('레벨 4의 검증 데이터 공개 후 제출할 수 있습니다.')
+            if not judge_enabled(): raise ValueError('OpenAI 채점 설정과 API 키를 확인하세요.')
+            if b.get('match_id')!=m['id'] or b.get('rev')!=d['rev']: raise ValueError('코드가 변경되었습니다. 동기화 후 다시 제출하세요.')
+            code=valid_code(b.get('code')); ep=epoch(c); key=(ep,m['id'],u['id'])
+            if key in SUBMITTING: raise ValueError('이미 채점 중입니다.')
+            SUBMITTING.add(key)
+            c.execute('UPDATE drafts SET code=?,rev=rev+1,updated_at=? WHERE match_id=? AND user_id=?',(code,time.time(),m['id'],u['id']))
+            p=relay_problem(c,m,u['team_id'],l)
+        try:
+            verdict,passed,total=judge_submission(code,p)
+            with LOCK,db() as c:
+                tick(c)
+                now_m=c.execute('SELECT * FROM matches WHERE id=?',(m['id'],)).fetchone()
+                if epoch(c)!=ep or not now_m or now_m['status']!='open': raise ValueError('채점 도중 경기가 종료되어 점수에 반영되지 않았습니다.')
+                now=time.time()
+                c.execute('INSERT INTO submissions(match_id,user_id,problem_id,at,verdict,passed,total,code) VALUES (?,?,?,?,?,?,?,?)',(m['id'],u['id'],p['id'],now,verdict,passed,total,code))
+                if verdict=='정답':
+                    prior=c.execute('SELECT 1 FROM solves WHERE match_id=? AND problem_id=?',(m['id'],p['id'])).fetchone()
+                    score=REWARD[l]//2 if prior and m['round']<=5 else REWARD[l]
+                    c.execute('INSERT INTO solves(match_id,team_id,user_id,problem_id,at,win_points,solve_points) VALUES (?,?,?,?,?,?,?)',(m['id'],u['team_id'],u['id'],p['id'],now,score,REWARD[l]))
+                    c.execute('INSERT INTO credits(team_id,amount,available_round,reason,at) VALUES (?,?,?,?,?)',(u['team_id'],REWARD[l],m['round'],p['id'],now))
+                    event(c,m['id'],u['team_id'],u['id'],'solve',f'Lv{l} 정답 · +{score} 승점')
+                    if m['round']==6 and l==5: close_match(c,now_m,u['team_id'],'level5'); tick(c)
+                else:
+                    c.execute('UPDATE drafts SET cooldown_until=? WHERE match_id=? AND user_id=?',(now+10,m['id'],u['id']))
+                    event(c,m['id'],u['team_id'],u['id'],'wrong',f'Lv{l} {verdict.splitlines()[0]}')
+                c.commit(); result=snapshot(c,self.user(c))
+            self.send(result)
+        except JudgeUnavailable as exc:
+            self.send({'error':'채점 서비스 오류: '+str(exc)+' 오답으로 처리하지 않았으며 재제출 대기시간도 적용하지 않았습니다.'},503)
+        finally:
+            with LOCK: SUBMITTING.discard(key)
+    def ai_hint(self,b):
+        with LOCK,db() as c:
+            u=self.user(c); tick(c); check_epoch(c,b); m,l,d=active_player(c,u); check_freeze(d)
+            p=problem_for(m,u['team_id'],l)
+            old=c.execute('SELECT 1 FROM purchases WHERE match_id=? AND user_id=? AND kind=?',(m['id'],u['id'],'assist')).fetchone()
+            if old: return self.send(snapshot(c,u))
+            if balance(c,u['team_id'])<HINT_COST['assist']: raise ValueError('solve포인트가 부족합니다.')
+            ep=epoch(c); code=valid_code(b.get('code'))
+        detail=assist(p,code)
+        with LOCK,db() as c:
+            tick(c)
+            if epoch(c)!=ep or current_round(c)!=m['round'] or setting(c,'phase')!='live': raise ValueError('경기가 종료되어 차감하지 않았습니다.')
+            purchase(c,u,m,p,'assist',detail); c.commit(); result=snapshot(c,self.user(c))
+        self.send(result)
 
+def purchase(c,u,m,p,kind,detail):
+    if c.execute('SELECT 1 FROM purchases WHERE match_id=? AND user_id=? AND kind=?',(m['id'],u['id'],kind)).fetchone(): return
+    cost=HINT_COST[kind]
+    if balance(c,u['team_id'])<cost: raise ValueError('팀 solve포인트가 부족합니다.')
+    now=time.time()
+    c.execute('INSERT INTO purchases(match_id,team_id,user_id,problem_id,kind,detail,cost,at) VALUES (?,?,?,?,?,?,?,?)',(m['id'],u['team_id'],u['id'],p['id'],kind,detail,cost,now))
+    c.execute('INSERT INTO credits(team_id,amount,available_round,reason,at) VALUES (?,?,?,?,?)',(u['team_id'],-cost,m['round'],kind,now))
+    event(c,m['id'],u['team_id'],u['id'],'hint',f'{u["name"]} · '+{'type':'문제 유형 공개','structure':'핵심 구조 공개','assist':'AI 조언'}[kind]+f' · -{cost} solve')
 
-if __name__ == "__main__":
-    setup()
-    port = int(os.environ.get("PORT", "8765"))
-    host = os.environ.get("HOST", "127.0.0.1")
-    print(f"Code Rumble: http://{host}:{port}", flush=True)
-    ThreadingHTTPServer((host, port), Handler).serve_forever()
+def valid_name(value,limit):
+    if not isinstance(value,str): raise ValueError('이름을 입력하세요.')
+    value=' '.join(value.split())
+    if not 2<=len(value)<=limit or not all(ch.isalnum() or ch in ' _-' for ch in value): raise ValueError(f'이름은 2~{limit}자의 문자·숫자·공백·_·-로 입력하세요.')
+    return value
+
+def valid_code(code,allow_empty=False):
+    if not isinstance(code,str) or len(code)>16000 or (not allow_empty and not code.strip()): raise ValueError('코드는 16,000자 이하로 입력하세요.')
+    return code
+
+def api_check_worker():
+    def report(row):
+        with LOCK: API_CHECK['results'].append(row)
+    try: run_checks(report)
+    except Exception as e: report({'name':'연결 시험','ok':False,'seconds':0,'detail':str(e)[:400]})
+    with LOCK: API_CHECK['status']='done'; API_CHECK['ended']=time.time()
+
+def ticker():
+    while True:
+        try:
+            with LOCK,db() as c: tick(c)
+        except Exception as e: print('timer:',repr(e),file=sys.stderr)
+        time.sleep(.5)
+
+if __name__=='__main__':
+    setup(); threading.Thread(target=ticker,daemon=True).start()
+    host=os.environ.get('HOST','127.0.0.1'); port=int(os.environ.get('PORT','8765'))
+    print(f'Code Rumble: http://{host}:{port}',flush=True)
+    ThreadingHTTPServer((host,port),Handler).serve_forever()

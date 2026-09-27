@@ -1,6 +1,8 @@
-"""Run with `python -m unittest discover -s tests -v`."""
+"""Integration coverage: readiness, scoring, cooldown, authoritative effects and reset."""
+import itertools
 import json
 import os
+from pathlib import Path
 import shutil
 import socket
 import sqlite3
@@ -11,171 +13,170 @@ import time
 import unittest
 import urllib.error
 import urllib.request
-from pathlib import Path
 
-BASE = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(BASE))
-from problems import PROBLEMS, REWARD, judge_inputs, reference_code  # noqa: E402
-from server import judge  # noqa: E402
+BASE=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(BASE))
+from problems import PROBLEMS,REWARD,HINT_COST,reference_code,expected_outputs,judge_inputs
+from services import judge
+from server import rename_variable,erase_last_line
 
-
-class TournamentTest(unittest.TestCase):
+class ProblemsTest(unittest.TestCase):
     def test_all_reference_solutions(self):
-        self.assertEqual(REWARD, {1: 100, 2: 150, 3: 200, 4: 250, 5: 300})
-        self.assertEqual({level: points // 2 for level, points in REWARD.items()},
-                         {1: 50, 2: 75, 3: 100, 4: 125, 5: 150})
+        self.assertEqual(len(PROBLEMS),35)
+        self.assertEqual(HINT_COST,{'type':50,'structure':150,'assist':300})
         for p in PROBLEMS:
-            with self.subTest(problem=p['id']):
-                self.assertGreaterEqual(len(p['cases']), 11)
-                self.assertGreaterEqual(len(judge_inputs(p)), 4)
-                verdict, passed, total = judge(reference_code(p), p)
-                self.assertEqual((verdict, passed), ('정답', total))
-                self.assertNotEqual(judge(p['solution'], p)[0], '정답')
+            with self.subTest(id=p['id']):
+                self.assertGreaterEqual(len(p['cases']),11)
+                result=judge(reference_code(p),p)
+                self.assertEqual(result[0],'정답')
+                self.assertNotEqual(judge('T=int(input())\nfor tc in range(1,T+1): print(f"#{tc} -999999")',p)[0],'정답')
 
-    def test_stable_free_service_codes(self):
-        seed = 'test-only-access-seed-that-is-over-32-characters'
-        env = os.environ | {'ACCESS_SEED': seed}
-        output = subprocess.check_output([sys.executable, str(BASE / 'access_codes.py')], env=env)
-        codes = json.loads(output)
-        self.assertEqual(len(codes['teams']), 5)
-        self.assertEqual(len({row['code'] for team in codes['teams'].values() for row in team}), 25)
-        same = subprocess.check_output([sys.executable, str(BASE / 'access_codes.py')], env=env)
-        self.assertEqual(output, same)
-        other = subprocess.check_output([sys.executable, str(BASE / 'access_codes.py')],
-                                        env=env | {'ACCESS_SEED': seed + '-other'})
-        self.assertNotEqual(output, other)
+    def test_final_independent_oracles(self):
+        for p in PROBLEMS:
+            if p['set'] not in (6,7) or p['level'] not in (4,5): continue
+            for case in p['cases']:
+                lines=case.splitlines()
+                if p['level']==4:
+                    n,m=map(int,lines[0].split()); d=[[10**9]*n for _ in range(n)]
+                    for i in range(n): d[i][i]=0
+                    for line in lines[1:]:
+                        a,b,w=map(int,line.split());d[a-1][b-1]=min(d[a-1][b-1],w)
+                    for k in range(n):
+                        for i in range(n):
+                            for j in range(n): d[i][j]=min(d[i][j],d[i][k]+d[k][j])
+                    expected=d[0][1:] if p['set']==6 else [d[i][n-1] for i in range(n-1)]
+                else:
+                    n,k=map(int,lines[0].split()); a=list(map(int,lines[1].split()))
+                    sums=[sum(a[i] for i in subset) for subset in itertools.combinations(range(n),k) if all(y-x>1 for x,y in zip(subset,subset[1:]))]
+                    expected=[min(sums) if p['set']==6 else max(sums)]
+                actual=expected_outputs(p|{'cases':[case]})[0].strip().split()[1:]
+                self.assertEqual(list(map(int,actual)),expected)
 
-    def test_round_to_final(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            shutil.copy(BASE / 'server.py', root)
-            shutil.copy(BASE / 'problems.py', root)
-            shutil.copy(BASE / 'access_codes.py', root)
-            shutil.copytree(BASE / 'static', root / 'static')
-            with socket.socket() as s:
-                s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]
-            env = os.environ | {'PORT': str(port), 'ACCESS_SEED': 'integration-test-seed-with-at-least-32-characters'}
-            env.pop('OPENAI_API_KEY', None)
-            proc = subprocess.Popen([sys.executable, str(root / 'server.py')], stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.PIPE, env=env)
+    def test_effects_preserve_non_variables(self):
+        code='count=1\ncount+=count\n# count comment\ntext="count"\nobj.count=5\n'
+        new,detail=rename_variable(code)
+        self.assertIn('"count"',new);self.assertIn('# count comment',new);self.assertIn('obj.count',new)
+        replacement=detail.split(' → ')[1]
+        self.assertEqual(len(replacement),10);self.assertTrue(replacement.isalpha())
+        self.assertIn(replacement+'+=',new)
+        formatted,_=rename_variable('count=2\nprint(f"한글 {count + count}")\n')
+        namespace={}
+        exec(compile(formatted,'<test>','exec'),namespace)
+        self.assertNotIn('{count',formatted)
+        self.assertEqual(erase_last_line('a=1\nprint(a)\n\n   \n'),'a=1\n\n   \n')
+
+class FlowTest(unittest.TestCase):
+    def test_complete_tournament(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            for p in BASE.glob('*.py'): shutil.copy(p,root)
+            shutil.copytree(BASE/'static',root/'static')
+            with socket.socket() as sock: sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+            env=os.environ|{'PORT':str(port),'HOST':'127.0.0.1','JUDGE_PROVIDER':'local','RUMBLE_DATA_DIR':str(root/'data'),'ACCESS_SEED':'integration-seed-with-more-than-32-characters'}
+            env.pop('OPENAI_API_KEY',None)
+            proc=subprocess.Popen([sys.executable,str(root/'server.py')],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
             try:
-                path = root / 'data' / 'access.json'
+                path=root/'data'/'access.json'
                 for _ in range(100):
                     if path.exists(): break
                     time.sleep(.05)
-                access = json.loads(path.read_text(encoding='utf-8'))
-                computed = json.loads(subprocess.check_output([sys.executable, str(root / 'access_codes.py')], env=env))
-                self.assertEqual(access, computed)
-                admin = access['admin']
-                a = access['teams']['블루'][0]['code']
-                a2 = access['teams']['블루'][1]['code']
-                b = access['teams']['레드'][0]['code']
-                with urllib.request.urlopen(f'http://127.0.0.1:{port}/', timeout=10) as page:
-                    self.assertIn(b'CODE RUMBLE', page.read())
-
-                def request(route, token, body=None):
-                    data = None if body is None else json.dumps(body).encode()
-                    req = urllib.request.Request(f'http://127.0.0.1:{port}/api/{route}', data=data,
-                                                 headers={'Authorization': 'Bearer ' + token,
-                                                          'Content-Type': 'application/json'})
+                access=json.loads(path.read_text()); admin=access['admin']; teams=list(access['teams'].values())
+                tokens=[[p['code'] for p in team] for team in teams]
+                def req(route,token=admin,body=None):
+                    data=json.dumps(body).encode() if body is not None else None
+                    request=urllib.request.Request(f'http://127.0.0.1:{port}/api/{route}',data=data,headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
                     try:
-                        with urllib.request.urlopen(req, timeout=10) as r:
-                            return json.load(r)
-                    except urllib.error.HTTPError as e:
-                        return json.load(e)
-
-                self.assertFalse(request('state', a)['me']['profile_complete'])
-                self.assertEqual(request('selection', a, {'level': 3})['error'], '먼저 선수 이름을 설정하세요.')
-                initial = request('profile', a, {'name': '민수', 'captain': True})
-                self.assertTrue(initial['me']['profile_complete'])
-                self.assertTrue(initial['me']['is_captain'])
-                self.assertEqual(initial['rewards'], {'1': 100, '2': 150, '3': 200, '4': 250, '5': 300})
-                self.assertIn('이미 팀장이', request('profile', a2, {'name': '지우', 'captain': True})['error'])
-                self.assertEqual(request('profile', a2, {'name': '민수'})['error'], '팀 안에 같은 이름을 사용하는 선수가 있습니다.')
-                request('profile', a2, {'name': '지우'})
-                self.assertEqual(request('team/name', a2, {'name': '번개팀'})['error'], '팀명은 대기실에 들어가기 전 팀장만 정할 수 있습니다.')
-                named = request('team/name', a, {'name': '번개팀'})
-                self.assertEqual(named['team_setup']['name'], '번개팀')
-                self.assertEqual(named['next_match']['team_a_name'], '번개팀')
-                logos = request('team/logos', a, {})['team_setup']['candidates']
-                self.assertEqual(len(logos), 3)
-                self.assertTrue(all(x['source'] == '임시 로고' for x in logos))
-                self.assertTrue(request('team/choose-logo', a, {'slot': 2})['team_setup']['complete'])
-                self.assertEqual(request('state', a2)['lobby_teams'][0]['name'], '번개팀')
-                # If no one volunteers, the last member becomes captain automatically.
-                gold = [x['code'] for x in access['teams']['골드']]
-                for i, token in enumerate(gold[:4]):
-                    self.assertFalse(request('profile', token, {'name': f'선수{i+1}'})['me']['is_captain'])
-                self.assertTrue(request('state', gold[4])['me']['force_captain'])
-                self.assertTrue(request('profile', gold[4], {'name': '마지막선수'})['me']['is_captain'])
-                request('profile', b, {'name': '지훈'})
-                self.assertEqual(request('state', a)['round'], 0)
-                self.assertEqual(request('selection', a, {'level': 3})['next_selection']['members'][0]['level'], 3)
-                self.assertIn('이미 선택한', request('selection', a2, {'level': 3})['error'])
-                self.assertIsNone(request('state', a2)['next_selection']['members'][1]['level'])
-                request('selection', a2, {'level': 1})
-                request('selection', b, {'level': 1})
-                round_state = request('admin/advance', admin, {})
-                self.assertEqual(round_state['duration'], 300)
-                self.assertAlmostEqual(round_state['matches'][0]['end_at'] - round_state['matches'][0]['start_at'], 300)
-                self.assertTrue(round_state['matches'][0]['status'] == 'open')
-                self.assertEqual(request('state', a)['me']['level'], 3)
-                self.assertEqual(request('state', a2)['me']['level'], 1)
-                with sqlite3.connect(root / 'data' / 'rumble.sqlite3') as conn:
-                    for team in (1, 2):
-                        levels = [row[0] for row in conn.execute(
-                            "SELECT level FROM round_assignments WHERE round=1 AND team_id=?", (team,))]
-                        self.assertEqual(sorted(levels), [1, 2, 3, 4, 5])
-                # Simulate a 20-minute deadline left by an earlier prototype.
-                with sqlite3.connect(root / 'data' / 'rumble.sqlite3') as conn:
-                    conn.execute("UPDATE matches SET end_at=start_at+1200 WHERE round=1 AND status='open'")
-                proc.terminate(); proc.communicate(timeout=3)
-                proc = subprocess.Popen([sys.executable, str(root / 'server.py')], stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.PIPE, env=env)
-                for _ in range(100):
-                    try:
-                        migrated = request('state', a)
-                        break
-                    except urllib.error.URLError:
-                        time.sleep(.05)
-                self.assertAlmostEqual(migrated['match']['end_at'] - migrated['match']['start_at'], 300)
-                sample = request('state', a2)['problems'][0]
-                self.assertTrue(sample['sample_input'].startswith('2\n'))
-                self.assertTrue(sample['sample_output'].startswith('#1 '))
-                error = request('submit', a2, {'code': 'T=int(input())\nprint(1/0)'})
-                self.assertIn('ZeroDivisionError', error['verdict'])
-                self.assertIn('ZeroDivisionError', request('state', a2)['last_submission']['verdict'])
-                self.assertTrue(request('hint', a, {'kind': 'type'})['error'].startswith('사용 가능한'))
-                code = reference_code(PROBLEMS[0])
-                first = request('submit', a2, {'code': code})
-                self.assertEqual((first['verdict'], first['win_points']), ('정답', 100))
-                self.assertEqual(first['state']['standings'][0]['credit'], 100)
-                hint_now = request('hint', a, {'kind': 'type'})
-                self.assertEqual(hint_now['detail'], PROBLEMS[2]['hint1'])
-                self.assertEqual(request('state', a)['standings'][0]['credit'], 50)
-                second = request('submit', b, {'code': code})
-                self.assertEqual((second['verdict'], second['win_points']), ('정답', 50))
-                repeat = request('submit', a2, {'code': code})
-                self.assertEqual(repeat['win_points'], 0)
-                request('selection', a, {'level': 5})
-                request('admin/advance', admin, {})
-                self.assertEqual(request('state', a)['me']['level'], 5)
-                self.assertEqual(request('state', a)['standings'][0]['credit'], 50)
-                for _ in range(3): request('admin/advance', admin, {})
-                self.assertIsNone(request('state', a)['next_selection'])
-                request('admin/close', admin, {})
-                self.assertEqual(request('selection', a, {'level': 4})['next_selection']['round'], 6)
-                request('selection', b, {'level': 4})
-                final = request('admin/advance', admin, {})
-                self.assertEqual(final['round'], 6)
-                self.assertEqual(len(final['matches']), 1)
-                self.assertEqual(request('state', a)['me']['level'], 4)
-                self.assertEqual(request('state', b)['me']['level'], 4)
+                        with urllib.request.urlopen(request,timeout=20) as r: return json.load(r)
+                    except urllib.error.HTTPError as e: return json.load(e)
+                def mutate(sql,args=()):
+                    with sqlite3.connect(root/'data'/'rumble.sqlite3') as c: c.execute(sql,args)
+                def action(route,token=admin,**kw): return req(route,token,{'epoch':req('state',token)['epoch'],**kw})
+                def submit(token,code=None):
+                    s=req('state',token);p=next(p for p in PROBLEMS if p['id']==s['problem']['id'])
+                    return req('submit',token,{'epoch':s['epoch'],'match_id':s['match']['id'],'rev':s['draft']['rev'],'code':code or reference_code(p)})
+                def write(token,code,rev=None):
+                    s=req('state',token)
+                    return req('draft',token,{'epoch':s['epoch'],'match_id':s['match']['id'],'rev':s['draft']['rev'] if rev is None else rev,'code':code})
+                def prepare():
+                    s=req('state')
+                    ids={p['id']:(ti,pi) for ti in range(5) for pi in range(5) for p in [req('state',tokens[ti][pi])['me']]}
+                    for match in s['matches']:
+                        for team in match['teams']:
+                            for i,p in enumerate(team['members']):
+                                ti,pi=ids[p['id']];token=tokens[ti][pi]
+                                self.assertNotIn('error',action('selection',token,level=i+1))
+                                self.assertNotIn('error',action('ready',token,ready=True))
+                    return action('admin/start')
+                self.assertEqual(req('state')['phase'],'matching')
+                self.assertIn('error',action('admin/start'))
+                # Exercise the actual onboarding endpoints for all twenty-five users.
+                for tid in range(5):
+                    for i,token in enumerate(tokens[tid]):
+                        s=req('profile',token,{'name':f'선수{tid+1}-{i+1}','captain':i==0})
+                        self.assertNotIn('error',s)
+                    req('team/name',tokens[tid][0],{'name':f'테스트팀{tid+1}'})
+                    logos=req('team/logos',tokens[tid][0],{})
+                    self.assertEqual(len(logos['team_setup']['candidates']),3)
+                    req('team/choose-logo',tokens[tid][0],{'slot':1})
+                s=prepare(); self.assertEqual(s['phase'],'live');self.assertEqual(s['duration'],300)
+                wrong=submit(tokens[0][0],'print("wrong")')
+                self.assertEqual(wrong['last_submission']['verdict'],'오답')
+                self.assertGreater(wrong['draft']['cooldown_until'],wrong['server_time'])
+                self.assertIn('대기시간',submit(tokens[0][0])['error'])
+                self.assertNotIn('error',write(tokens[0][0],'answer=123'))
+                mutate('UPDATE drafts SET cooldown_until=0')
+                first=submit(tokens[0][0]);self.assertEqual(first['solved']['win_points'],100)
+                second=submit(tokens[1][0]);self.assertEqual(second['solved']['win_points'],50)
+                hint=action('hint',tokens[0][1],kind='type')
+                self.assertEqual(hint['hints'][0]['cost'],50)
+                self.assertEqual(next(t for t in hint['standings'] if t['id']==1)['credit'],50)
+                details=req('inspect?user_id='+str(first['me']['id']))
+                self.assertIsNotNone(details['accepted_code'])
+                self.assertIn('error',req('inspect?user_id='+str(first['me']['id']),tokens[1][0]))
+                self.assertNotIn('draft',first['match']['teams'][1]['members'][0])
+                # The background timer ends the match without any state request.
+                mutate("UPDATE matches SET end_at=? WHERE round=1",(time.time()-.1,));time.sleep(.7)
+                with sqlite3.connect(root/'data'/'rumble.sqlite3') as c:
+                    self.assertEqual(c.execute("SELECT COUNT(*) FROM matches WHERE round=1 AND status='closed'").fetchone()[0],2)
+                s=req('state');self.assertEqual(s['phase'],'results');self.assertEqual(s['standings'][0]['points'],200)
+                self.assertEqual(req('state')['standings'][0]['points'],200) # bonus once
+                self.assertIn('error',action('admin/start'))
+                for round_no in range(2,6):
+                    self.assertEqual(action('admin/next')['phase'],'matching')
+                    self.assertEqual(prepare()['round'],round_no)
+                    action('admin/close')
+                action('admin/next'); final=prepare()
+                self.assertEqual(final['duration'],600)
+                self.assertEqual(final['round'],6)
+                self.assertEqual(len(final['matches']),1)
+                a,b=tokens[0],tokens[1]
+                self.assertNotEqual(req('state',a[0])['problem']['id'],req('state',b[0])['problem']['id'])
+                self.assertIn('레벨 4',submit(a[4])['error'])
+                submit(a[0]);freeze=action('item',a[0]);self.assertFalse(freeze['item_available'])
+                self.assertIn('빙결',write(b[3],'x=1')['error'])
+                self.assertTrue(all(x['freeze_until']>time.time() for x in req('state')['matches'][0]['teams'][1]['members']))
+                self.assertIn('이미',action('item',a[0])['error'])
+                mutate('UPDATE drafts SET freeze_until=0')
+                for token in b[3:]: write(token,'count=1\ncount+=count\nprint(count)\n\n')
+                stale=req('state',b[3])['draft']['rev']
+                submit(a[1]);action('item',a[1])
+                self.assertNotIn('count',req('state',b[3])['draft']['code'])
+                self.assertTrue(write(b[3],'count=99',stale)['conflict'])
+                before=req('state',b[3])['draft']['code']
+                submit(a[2]);action('item',a[2])
+                self.assertEqual(req('state',b[3])['draft']['code'],erase_last_line(before))
+                relay=submit(a[3]);self.assertTrue(relay['relay']['output'])
+                self.assertEqual(req('state',a[4])['relay'],relay['relay'])
+                self.assertIsNone(req('state',b[4])['relay'])
+                winner=submit(a[4]);self.assertEqual(winner['phase'],'finished');self.assertEqual(winner['match']['winner'],1)
+                self.assertEqual(winner['match']['bonus'],0)
+                self.assertIn('error',action('admin/next'))
+                old_epoch=winner['epoch'];reset=action('admin/reset',confirmation='전체 초기화')
+                self.assertNotEqual(reset['epoch'],old_epoch);self.assertEqual(reset['round'],0)
+                self.assertTrue(all(t['points']==0 for t in reset['standings']))
+                self.assertFalse(req('state',a[0])['me']['profile_complete'])
             finally:
-                proc.terminate()
-                try: proc.communicate(timeout=3)
-                except subprocess.TimeoutExpired: proc.kill()
+                proc.terminate();out,err=proc.communicate(timeout=5)
+                if err: print(err.decode(),file=sys.stderr)
 
-
-if __name__ == '__main__':
-    unittest.main()
+if __name__=='__main__': unittest.main()

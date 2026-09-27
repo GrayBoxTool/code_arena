@@ -95,10 +95,12 @@
       menu.style.top = `${Math.max(8, Math.min(y, pane.clientHeight - 42))}px`;
     }
     function insert(text) {
+      if (textarea.readOnly) return;
       textarea.setRangeText(text, textarea.selectionStart, textarea.selectionEnd, 'end');
       textarea.dispatchEvent(new Event('input', {bubbles: true}));
     }
     function accept(index) {
+      if (textarea.readOnly) return;
       const word = suggestions[index];
       if (!word) return;
       const start = textarea.selectionStart - /([A-Za-z_]\w*)$/.exec(textarea.value.slice(0, textarea.selectionStart))[0].length;
@@ -110,6 +112,7 @@
     textarea.addEventListener('scroll', () => {mirror.scrollTop=textarea.scrollTop;mirror.scrollLeft=textarea.scrollLeft;gutter.scrollTop=textarea.scrollTop; if (!menu.hidden) show();});
     textarea.addEventListener('click', show);
     textarea.addEventListener('keydown', event => {
+      if (textarea.readOnly) { hide(); return; }
       if(!event.ctrlKey && !event.metaKey && !event.altKey && pairs[event.key]){
         event.preventDefault();
         const start=textarea.selectionStart,end=textarea.selectionEnd;
