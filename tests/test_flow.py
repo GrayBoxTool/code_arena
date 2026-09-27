@@ -32,15 +32,29 @@ class TournamentTest(unittest.TestCase):
                 self.assertEqual((verdict, passed), ('정답', total))
                 self.assertNotEqual(judge(p['solution'], p)[0], '정답')
 
+    def test_stable_free_service_codes(self):
+        seed = 'test-only-access-seed-that-is-over-32-characters'
+        env = os.environ | {'ACCESS_SEED': seed}
+        output = subprocess.check_output([sys.executable, str(BASE / 'access_codes.py')], env=env)
+        codes = json.loads(output)
+        self.assertEqual(len(codes['teams']), 5)
+        self.assertEqual(len({row['code'] for team in codes['teams'].values() for row in team}), 25)
+        same = subprocess.check_output([sys.executable, str(BASE / 'access_codes.py')], env=env)
+        self.assertEqual(output, same)
+        other = subprocess.check_output([sys.executable, str(BASE / 'access_codes.py')],
+                                        env=env | {'ACCESS_SEED': seed + '-other'})
+        self.assertNotEqual(output, other)
+
     def test_round_to_final(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             shutil.copy(BASE / 'server.py', root)
             shutil.copy(BASE / 'problems.py', root)
+            shutil.copy(BASE / 'access_codes.py', root)
             shutil.copytree(BASE / 'static', root / 'static')
             with socket.socket() as s:
                 s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]
-            env = os.environ | {'PORT': str(port)}
+            env = os.environ | {'PORT': str(port), 'ACCESS_SEED': 'integration-test-seed-with-at-least-32-characters'}
             env.pop('OPENAI_API_KEY', None)
             proc = subprocess.Popen([sys.executable, str(root / 'server.py')], stdout=subprocess.DEVNULL,
                                     stderr=subprocess.PIPE, env=env)
@@ -50,6 +64,8 @@ class TournamentTest(unittest.TestCase):
                     if path.exists(): break
                     time.sleep(.05)
                 access = json.loads(path.read_text(encoding='utf-8'))
+                computed = json.loads(subprocess.check_output([sys.executable, str(root / 'access_codes.py')], env=env))
+                self.assertEqual(access, computed)
                 admin = access['admin']
                 a = access['teams']['블루'][0]['code']
                 a2 = access['teams']['블루'][1]['code']

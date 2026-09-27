@@ -1,6 +1,8 @@
 """Tournament prototype. Public deployments require an isolated judge; see README."""
 import base64
+import hashlib
 import html
+import hmac
 import json
 import os
 import secrets
@@ -37,6 +39,18 @@ LOGO_PROMPT = ("Create an original esports tournament team emblem for the name '
                "Use only the supplied team name as text, if any. Make an independent design: "
                "do not reproduce or closely imitate any existing esports team logo, trademark, "
                "mascot, crest, lettermark or distinctive color arrangement. Square composition.")
+
+
+def access_token(role, team_id=0, level=0):
+    """Keep access codes stable across ephemeral free-service restarts."""
+    seed = os.environ.get("ACCESS_SEED")
+    if not seed:
+        return secrets.token_urlsafe(24 if role == "admin" else 18)
+    if len(seed) < 32:
+        raise ValueError("ACCESS_SEED는 추측하기 어려운 32자 이상의 값으로 설정하세요.")
+    label = f"code-rumble:v1:{role}:{team_id}:{level}".encode()
+    digest = hmac.new(seed.encode(), label, hashlib.sha256).digest()[:24]
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
 
 
 @contextmanager
@@ -128,7 +142,7 @@ def setup():
                       (r, r+1))
             return
         access = {"admin": None, "teams": {}}
-        token = secrets.token_urlsafe(24)
+        token = access_token("admin")
         c.execute("INSERT INTO users(name,team_id,level,token,role,profile_complete) VALUES (?,?,?,?,?,1)",
                   ("운영자", None, None, token, "admin"))
         access["admin"] = token
@@ -136,7 +150,7 @@ def setup():
             c.execute("INSERT INTO teams(id,name) VALUES (?,?)", (team_id, name))
             access["teams"][name] = []
             for level in range(1, 6):
-                t = secrets.token_urlsafe(18)
+                t = access_token("player", team_id, level)
                 player = f"{name} {level}번"
                 c.execute("INSERT INTO users(name,team_id,level,token,role) VALUES (?,?,?,?,?)",
                           (player, team_id, level, t, "player"))

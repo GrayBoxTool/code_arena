@@ -1,14 +1,21 @@
+# Optional long-term data storage. To use this, copy this file over render.yaml.
 services:
   - type: web
     name: code-rumble-api
     runtime: python
-    plan: free
+    plan: starter
     buildCommand: "python -m py_compile server.py problems.py"
     startCommand: "python server.py"
     healthCheckPath: /
+    disk:
+      name: rumble-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: HOST
         value: 0.0.0.0
+      - key: RUMBLE_DATA_DIR
+        value: /var/data
       - key: FRONTEND_ORIGIN
         sync: false
       - key: ACCESS_SEED

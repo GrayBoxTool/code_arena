@@ -76,13 +76,27 @@ py -3 server.py
 
 `logo_prompt.txt`에 로고 생성 프롬프트를 별도로 실었습니다. 일반적인 국제 e스포츠 팀 로고의 시각적 특성을 설명하면서 실제 구단의 고유 로고·상표를 복제하지 않도록 지시합니다. 기존 롤드컵 출전팀 로고를 API에 학습시키는 기능은 포함하지 않습니다. AI 조언에는 문제 설명과 현재 코드가 전송되고, 로고 생성에는 팀명이 전송됩니다. 실패한 AI 조언은 포인트를 차감하지 않습니다. 각 호출은 사용 계정의 과금 대상입니다.
 
-## Netlify + Render 배포 준비
+## Netlify + Render 무료 체험 배포
 
-1. Git 저장소 루트에 `netlify.toml`과 `render.yaml`을 함께 올립니다. Render Blueprint는 Python 웹 서비스와 1GB 영속 디스크를 설정합니다. Render 서비스의 비밀 환경 변수 `FRONTEND_ORIGIN`에 실제 Netlify 주소(예: `https://my-arena.netlify.app`, 끝 `/` 제외)를 입력합니다. `OPENAI_API_KEY`는 구매 후 Render의 환경 변수에만 등록합니다.
-2. Netlify에서 이 저장소를 연결해 배포하면 `netlify.toml`이 `static` 폴더를 게시합니다. 배포 전에 `static/config.js`의 `RUMBLE_API_BASE_URL`을 실제 Render URL(예: `https://code-rumble-api.onrender.com`)로 바꾸고 재배포합니다. 이 파일에 API 키를 넣지 마세요.
-3. Render 디스크의 `/var/data/access.json`에서 최초 참가 코드를 운영자만 확인하여 각 참가자에게 개별 전달합니다. 데이터베이스와 코드는 이 디스크에 유지됩니다. `render.yaml`의 유료 `starter` 플랜과 디스크 요금·서비스 URL은 Render 관리 화면에서 확인하세요. `FRONTEND_ORIGIN`은 접속 출처 하나를 정확히 입력합니다.
+현재 `render.yaml`은 **Render 무료 웹 서비스**로 설정되어 있으며 디스크와 추가 패키지를 요구하지 않습니다. 이미 Netlify에 프론트엔드를 배포했다면 아래 순서로 이어서 진행하세요.
 
-**공개 서비스 채점 제한:** 이 프로토타입의 로컬 채점기는 제출된 Python 코드를 실행하며 운영체제 수준 격리가 없습니다. `HOST=0.0.0.0`인 Render에서는 `/api/submit`을 의도적으로 차단합니다. 따라서 이 두 배포 설정만으로 공개 대회의 코드 제출·점수 집계는 동작하지 않습니다. 공개 운영 전에는 별도의 격리 채점 서비스 연결, 참가 코드 전달 방식과 인증 강화, 동시성 및 운영 검증이 필요합니다. 로컬에서 `python server.py`로 실행하면 기존 제출 기능을 시험할 수 있습니다. 방화벽이나 프록시로 외부에 공개한 로컬 서버도 안전하지 않습니다.
+1. 32자 이상의 무작위 `ACCESS_SEED`를 정합니다. Python에서 `python -c "import secrets; print(secrets.token_urlsafe(32))"`로 만들 수 있습니다. 이 값은 참가 코드 전체를 결정하므로 API 키처럼 비밀로 보관하세요.
+2. Git 저장소 루트에 갱신된 `render.yaml`, `server.py`, `access_codes.py`를 올립니다. Render의 **New → Blueprint**에서 저장소를 선택하세요. `FRONTEND_ORIGIN`에는 이미 만든 실제 Netlify 주소(예: `https://my-arena.netlify.app`, 끝 `/` 제외), `ACCESS_SEED`에는 1번의 값을 입력합니다. 이 두 값은 소스코드에 적지 않습니다. Blueprint가 유료 서비스를 제안한다면 `render.yaml`의 `plan: free`와 `disk` 항목 부재를 먼저 확인하세요.
+3. Render 서비스가 열리면 `https://...onrender.com` 주소를 복사하여 `static/config.js`의 `RUMBLE_API_BASE_URL`에 입력한 뒤 Netlify를 재배포합니다. 이 파일에는 API 키나 `ACCESS_SEED`를 넣지 마세요.
+4. 무료 Render에는 Shell이 없으므로 참가 코드는 자신의 컴퓨터에서 확인합니다. **같은 `ACCESS_SEED`**를 터미널의 환경 변수로 지정하고 `code-rumble` 폴더에서 `python access_codes.py`를 실행하세요. 출력의 `admin` 코드는 운영자용이고 `teams` 아래의 `code`는 선수별 코드입니다. PowerShell 예시는 아래와 같습니다. 코드는 각 선수에게 개별 전달하세요.
+
+   ```powershell
+   $env:ACCESS_SEED = 'Render에 입력한 같은 비밀값'
+   py -3 access_codes.py
+   ```
+
+5. OpenAI API 키를 구매하면 **Render 서비스의 Environment**에 `OPENAI_API_KEY`를 추가합니다. 로고와 AI 조언 기능에 사용됩니다. `FRONTEND_ORIGIN`은 실제 Netlify 주소 하나를 정확히 입력합니다.
+
+**무료 체험의 제약:** Render 무료 웹 서비스가 일정 시간 사용되지 않아 잠들거나 재시작·재배포되면 SQLite의 팀명, 로고, 점수, 경기 상태가 초기화됩니다. `ACCESS_SEED`를 유지하면 접속 코드는 그대로지만 대회 진행 기록은 유지되지 않습니다. 이 환경은 화면과 가입 흐름을 시험하는 용도입니다. 공개 서버에서는 제출된 코드를 안전하게 실행할 격리 채점기가 없어 `/api/submit`이 차단됩니다. 실제 온라인 대회를 운영하려면 영속 저장소와 별도 격리 채점기 연결이 필요합니다. 로컬에서 `python server.py`로 실행하면 데이터가 로컬 디스크에 유지되고 제출 기능도 시험할 수 있습니다. 신뢰하지 않는 사람에게 로컬 채점기를 공개하지 마세요.
+
+Render 계정에 결제 수단을 등록했다면 무료 서비스도 포함량 초과 트래픽·빌드 사용량에 과금될 수 있습니다. 지출을 피하려면 Render의 사용량·결제 설정을 확인하고, 결제 수단 미등록 상태에서 무료 제공량을 넘을 때 서비스가 중단될 수 있다는 점을 감안하세요.
+
+필요할 때만 `render-paid.yaml`을 `render.yaml`로 복사하면 유료 영속 디스크 구성으로 바꿀 수 있습니다. 저장소에 `render-paid.yaml`이 존재하는 것만으로는 유료 서비스가 생성되지 않습니다.
 
 ## 테스트
 
