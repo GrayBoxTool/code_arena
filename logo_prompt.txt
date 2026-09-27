@@ -1,0 +1,10 @@
+Create an original esports tournament team emblem for the name '{team_name}'.
+Visual direction: bold symmetrical heraldic silhouette, sharp geometric animal or
+mythic motif, confident negative space, compact vector-like shapes, high contrast,
+premium competitive gaming identity, dark backdrop, clean edges, legible at 64px.
+Use only the supplied team name as text, if any. Make an independent design: do not
+reproduce or closely imitate any existing esports team logo, trademark, mascot,
+crest, lettermark or distinctive color arrangement. Square composition.
+
+The prototype sends this stylistic prompt to the image generation API. It does
+not train a model on logos from Worlds teams or bundle their artwork.

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: code-rumble-api
+    runtime: python
+    plan: starter
+    buildCommand: "python -m py_compile server.py problems.py"
+    startCommand: "python server.py"
+    healthCheckPath: /
+    disk:
+      name: rumble-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: RUMBLE_DATA_DIR
+        value: /var/data
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_IMAGE_MODEL
+        value: gpt-image-1
