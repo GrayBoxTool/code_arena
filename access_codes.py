@@ -4,7 +4,7 @@ import os
 
 from server import TEAM_NAMES, access_token
 
-if not os.environ.get("qOaVlYO_QqB1HnOhxu-XDblvAxfFE5jvYL9YIXPOq8o"):
+if not os.environ.get("ACCESS_SEED"):
     raise SystemExit("먼저 Render에 입력한 것과 같은 ACCESS_SEED 환경 변수를 설정하세요.")
 
 codes = {"admin": access_token("admin"), "teams": {}}

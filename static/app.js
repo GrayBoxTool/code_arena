@@ -240,10 +240,6 @@ function playerView(s) {
 function render() {
   if (!state) return loginView();
   const oldEditor = app.querySelector('#editor');
-  const oldTeamName = app.querySelector('#team-name');
-  const teamNameDraft = oldTeamName && document.activeElement === oldTeamName
-    ? {value: oldTeamName.value, start: oldTeamName.selectionStart, end: oldTeamName.selectionEnd}
-    : null;
   const active = document.activeElement === oldEditor;
   const cursor = active ? [oldEditor.selectionStart, oldEditor.selectionEnd] : null;
   const scroll = oldEditor ? [oldEditor.scrollTop, oldEditor.scrollLeft] : null;
@@ -254,12 +250,6 @@ function render() {
   const editor = app.querySelector('#editor');
   if (editor && scroll) {editor.scrollTop=scroll[0];editor.scrollLeft=scroll[1];editor.dispatchEvent(new Event('scroll'));}
   if (active && editor) {editor.focus(); editor.setSelectionRange(...cursor);}
-  const teamName = app.querySelector('#team-name');
-  if (teamName && teamNameDraft) {
-    teamName.value = teamNameDraft.value;
-    teamName.focus();
-    teamName.setSelectionRange(teamNameDraft.start, teamNameDraft.end);
-  }
 }
 async function refresh() {
   if (!auth || busy) return;
@@ -302,7 +292,7 @@ setInterval(() => {
   if (!state) return;
   const clock=document.querySelector('#clock');
   if(clock) clock.textContent=countdown(state.match || state.matches[0]);
-  if (state.me.role==='player' && state.me.profile_complete && shownPhase!=='team-setup') {
+  if (state.me.role==='player' && state.me.profile_complete) {
     const phase=playerPhase(state);
     if (phase!==shownPhase) {render();return;}
     const resultClock=document.querySelector('#result-clock');
