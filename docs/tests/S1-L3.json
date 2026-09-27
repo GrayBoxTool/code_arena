@@ -1,0 +1,25 @@
+{
+  "id": "S1-L3",
+  "files": [
+    {
+      "public": true,
+      "input": "2\n3 4\nS...\n##.#\n...E\n2 2\nS#\n#E\n",
+      "output": "#1 5\n#2 -1\n"
+    },
+    {
+      "public": false,
+      "input": "3\n1 2\nSE\n3 3\nS##\n###\n##E\n4 4\nS#..\n.#.#\n.#..\n...E\n",
+      "output": "#1 1\n#2 -1\n#3 6\n"
+    },
+    {
+      "public": false,
+      "input": "3\n2 5\nS...E\n.....\n3 3\nS..\n.#.\n..E\n2 3\nS..\n..E\n",
+      "output": "#1 4\n#2 4\n#3 3\n"
+    },
+    {
+      "public": false,
+      "input": "3\n1 6\nS...#E\n3 4\nS.#.\n..#.\n...E\n4 4\nS...\n.##.\n...#\n...E\n",
+      "output": "#1 -1\n#2 5\n#3 6\n"
+    }
+  ]
+}

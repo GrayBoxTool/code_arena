@@ -125,7 +125,9 @@ function solvedView(s){
   ${s.relay?`<h3>팀 전용 레벨 4 출력</h3><pre class="sample">${esc(s.relay.output)}</pre><p>레벨 5 담당자에게 자동 전달되었습니다.</p>`:''}</section>${board(s)}`;
   const b=app.querySelector('#use-item');if(b)b.onclick=()=>action('item');
 }
-function problemHTML(p){return `<span class="kicker">${esc(p.id)} · LEVEL ${p.level}</span><h2>${esc(p.title)}</h2><p class="problem-statement">${esc(p.statement)}</p><h3>입력</h3><p class="problem-statement">${esc(p.input)}</p><h3>출력</h3><p class="problem-statement">${esc(p.output)}</p><h3>예제 입력</h3><pre class="sample">${esc(p.sample_input)}</pre><h3>예제 출력</h3><pre class="sample">${esc(p.sample_output)}</pre>`;}
+function sampleHTML(title,text){return `<h3>${esc(title)}</h3><pre class="sample sample-raw">${esc(text)}</pre><details class="whitespace-view"><summary>공백·줄바꿈 표시 보기</summary><p class="meta">␠는 공백 한 칸, ↵는 줄바꿈입니다. 이 기호는 실제 입력·출력에 포함하지 않습니다.</p><pre class="sample">${esc(String(text).replace(/ /g,'␠').replace(/\n/g,'↵\n'))}</pre></details>`;}
+function problemHTML(p){return `<article class="problem-document"><span class="kicker">${esc(p.id)} · LEVEL ${p.level}</span><h2>${esc(p.title)}</h2><section class="problem-section"><h3>문제 설명</h3><p class="problem-statement">${esc(p.statement)}</p></section><section class="problem-section"><h3>입력</h3><p class="problem-statement">${esc(p.input)}</p><h3>테스트케이스 하나의 입력 형식</h3><pre class="sample sample-raw">${esc(p.input_format)}</pre><p class="meta">위 형식의 값 사이 공백은 구분자입니다. ...는 반복을 나타내는 설명이며 실제 입력에는 없습니다.</p></section><section class="problem-section"><h3>제약조건</h3><p class="problem-statement">${esc(p.constraints)}</p></section><section class="problem-section"><h3>출력</h3><p class="problem-statement">${esc(p.output)}</p><pre class="sample sample-raw">${esc(p.output_format)}</pre><p class="meta">tc, answer, value 등의 이름은 자리 표시자입니다. 실제 출력에는 테스트케이스 번호와 계산한 값을 넣습니다.</p></section><section class="problem-section">${sampleHTML('예제 입력',p.sample_input)}${sampleHTML('예제 출력',p.sample_output)}</section><section class="problem-section"><h3>예제 해설</h3><p class="problem-statement">${esc(p.sample_explanation)}</p></section></article>`;}
+
 function playView(s){
   const p=s.problem;submitError='';pendingSubmission=null;
   app.innerHTML=`<div class="topline"><div><div class="eyebrow">${roundLabel(s.round)} · ${esc(s.me.name)} · LV ${s.me.level}</div><h1>${esc(p.title)}</h1></div><div><span class="meta">남은 시간 </span><strong class="clock" data-end="${s.match.end_at}">${timeLabel(s.match.end_at)}</strong></div></div><div id="freeze-banner" class="freeze-banner" hidden></div>
@@ -167,17 +169,17 @@ async function submitCode(){
 }
 function updatePlay(){
   if(view!=='play'||!state?.draft)return;
-  const s=state,d=s.draft,freeze=seconds(d.freeze_until),cool=seconds(d.cooldown_until),blocked=s.match.round===6&&s.me.level===5&&!s.relay;
+  const s=state,d=s.draft,freeze=seconds(d.freeze_until),cool=seconds(d.cooldown_until);
   const editor=app.querySelector('#editor');if(!editor)return;editor.readOnly=freeze>0;
   app.querySelector('#problem-mask').hidden=!freeze;app.querySelector('#problem-content').style.visibility=freeze?'hidden':'visible';
   const banner=app.querySelector('#freeze-banner');banner.hidden=!freeze;banner.textContent=`빙결 · ${freeze}초 동안 문제와 코드 작성이 잠깁니다`;
-  const button=app.querySelector('#submit');button.disabled=busy||freeze>0||cool>0||blocked||!s.judge_enabled;
-  app.querySelector('#submit-timer').textContent=freeze?`빙결 ${freeze}초`:cool?`재제출까지 ${cool}초`:blocked?'Lv4 검증 데이터 공개 대기':!s.judge_enabled?'OpenAI 채점 설정 필요':'';
+  const button=app.querySelector('#submit');button.disabled=busy||freeze>0||cool>0||!s.judge_enabled;
+  app.querySelector('#submit-timer').textContent=freeze?`빙결 ${freeze}초`:cool?`재제출까지 ${cool}초`:!s.judge_enabled?'OpenAI 채점 설정 필요':'';
   app.querySelector('#sync-status').textContent=editState?.dirty?'코드 저장 중…':'운영자와 코드 공유 중';
   const team=s.standings.find(t=>t.id===s.me.team_id);app.querySelector('#balance').textContent=fmt(team?.credit);
   app.querySelector('#hint-details').innerHTML=s.hints.map(h=>`<h3>${labels[h.kind]}</h3><p>${esc(h.detail)}</p>`).join('');
   const verdict=app.querySelector('#verdict');if(submitError)verdict.textContent=submitError;else if(!busy&&s.last_submission)verdict.textContent=`${s.last_submission.verdict}\n${s.last_submission.passed}/${s.last_submission.total}개 채점 파일 통과`;
-  const relay=app.querySelector('#relay-box');if(s.relay&&s.me.level===5)relay.innerHTML=`<h3>Lv4 출력으로 구성된 최종 검증 입력</h3><pre class="sample">1\n${esc(s.relay.level5_input)}</pre><p>이 입력도 서버가 정답 검증에 사용합니다.</p>`;
+  const relay=app.querySelector('#relay-box');if(s.match.round===6&&s.me.level===5&&!s.relay)relay.innerHTML='<section class="problem-section"><h3>팀 전용 입력</h3><p>지금도 코드를 제출할 수 있습니다. 같은 팀이 Lv4를 해결하면 그 출력으로 만든 추가 검증 입력이 여기에 공개됩니다.</p></section>';if(s.relay&&s.me.level===5)relay.innerHTML=`<h3>Lv4 출력으로 구성된 최종 검증 입력</h3><pre class="sample">1\n${esc(s.relay.level5_input)}</pre><p>Lv4의 실제 출력값을 사용한 입력입니다. 이 데이터는 결승 시작부터 채점에 포함되어 있으며, 공개 전에도 Lv5 제출이 가능합니다.</p>`;
 }
 function phase(s){
   if(s.me.role==='admin')return 'admin';if(!s.me.profile_complete)return 'profile';if(s.me.is_captain&&!s.team_setup.complete)return 'team-setup';

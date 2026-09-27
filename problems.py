@@ -1,4 +1,4 @@
-"""Fifteen original, self-contained programming problems.
+"""Thirty-five original programming problems with SWEA-style stdin/stdout.
 
 The `cases` and `solution` fields never leave the server. All input/output
 is UTF-8 plain text; submissions are ordinary Python stdin/stdout programs.
@@ -200,12 +200,18 @@ def expected_outputs(problem):
 
 
 def public_problem(problem):
-    result = {k: problem[k] for k in ("id", "set", "level", "title", "statement", "input", "output")}
-    result["input"] = "첫 줄에 테스트케이스 수 T(1≤T≤3)가 주어진다. 각 테스트케이스마다 " + result["input"]
-    result["output"] = "각 테스트케이스의 정답을 '#tc 정답' 형식으로 한 줄씩 출력한다. " + result["output"]
+    fields=("id", "set", "level", "title", "statement", "input", "output",
+            "constraints", "input_format", "output_format", "sample_explanation")
+    result={k:problem[k] for k in fields}
+    result["input"]=("전체 입력의 첫 줄에는 테스트케이스 수 T가 주어집니다. (1 ≤ T ≤ 3)\n"
+                     "이후 아래 형식의 테스트케이스가 T개 이어집니다. 테스트케이스 사이에 빈 줄은 없습니다.\n\n"
+                     +result["input"]+"\n\n한 줄의 여러 값은 공백으로 구분됩니다. 문자열·지도 행의 공백 여부는 위 설명을 따르세요.")
+    result["output"]=("각 테스트케이스마다 한 줄에 #과 테스트케이스 번호 tc를 붙여 출력하고, 공백 한 칸 뒤에 정답을 출력합니다.\n"
+                      "tc는 1부터 시작합니다. 예: #1 10\n\n"+result["output"])
     return result
 
 # Five unique rumble rounds and two balanced, distinct final lanes.
 from bank_v2 import build_bank
-PROBLEMS = build_bank(PROBLEMS)
+from problem_texts import enrich_bank
+PROBLEMS = enrich_bank(build_bank(PROBLEMS))
 HINT_COST = {"type": 50, "structure": 150, "assist": 300}

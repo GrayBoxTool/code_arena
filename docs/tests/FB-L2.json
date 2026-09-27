@@ -1,0 +1,50 @@
+{
+  "id": "FB-L2",
+  "files": [
+    {
+      "public": true,
+      "input": "2\n3 7\n5 5\n",
+      "output": "#1 2\n#2 0\n"
+    },
+    {
+      "public": false,
+      "input": "3\n0 100\n100 0\n100 77\n",
+      "output": "#1 9\n#2 100\n#3 23\n"
+    },
+    {
+      "public": false,
+      "input": "3\n55 87\n12 95\n48 20\n",
+      "output": "#1 13\n#2 4\n#3 28\n"
+    },
+    {
+      "public": false,
+      "input": "3\n27 45\n87 25\n82 99\n",
+      "output": "#1 6\n#2 62\n#3 17\n"
+    },
+    {
+      "public": false,
+      "input": "3\n90 26\n43 41\n3 97\n",
+      "output": "#1 64\n#2 2\n#3 6\n"
+    },
+    {
+      "public": false,
+      "input": "3\n10 47\n88 37\n0 78\n",
+      "output": "#1 5\n#2 51\n#3 9\n"
+    },
+    {
+      "public": false,
+      "input": "3\n28 51\n42 79\n91 14\n",
+      "output": "#1 4\n#2 4\n#3 77\n"
+    },
+    {
+      "public": false,
+      "input": "3\n69 60\n76 3\n16 56\n",
+      "output": "#1 9\n#2 73\n#3 4\n"
+    },
+    {
+      "public": false,
+      "input": "1\n52 94\n",
+      "output": "#1 6\n"
+    }
+  ]
+}

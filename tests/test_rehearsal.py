@@ -50,12 +50,13 @@ class RehearsalTest(unittest.TestCase):
                     if access.exists(): break
                     time.sleep(.05)
                 self.assertTrue(access.exists())
-                admin=json.loads(access.read_text())['admin']
+                codes=json.loads(access.read_text())
+                admin=codes['admin']
 
-                def req(route,payload=None):
+                def req(route,payload=None,token=None):
                     data=json.dumps(payload).encode() if payload is not None else None
                     request=urllib.request.Request(f'http://127.0.0.1:{port}/api/{route}',data=data,
-                        headers={'Authorization':'Bearer '+admin,'Content-Type':'application/json'})
+                        headers={'Authorization':'Bearer '+(token or admin),'Content-Type':'application/json'})
                     try:
                         with urllib.request.urlopen(request,timeout=20) as response:return json.load(response)
                     except urllib.error.HTTPError as error:return json.load(error)
@@ -111,9 +112,17 @@ class RehearsalTest(unittest.TestCase):
                 self.assertEqual(final['duration'],600)
                 self.assertEqual(final['round'],6)
                 mid=final['matches'][0]['id']
-                self.assertIn('error',action('simulate',match_id=mid,team_id=2,level=5,verdict='correct'))
-                action('simulate',match_id=mid,team_id=2,level=4,verdict='correct')
-                done=action('simulate',match_id=mid,team_id=2,level=5,verdict='correct')
+                # Final Lv5 is permitted even before the same team's Lv4 is solved.
+                from problems import PROBLEMS,reference_code
+                token=next(player['code'] for roster in codes['teams'].values() for player in roster
+                           if (lambda s:s['me']['team_id']==2 and s['me']['level']==5)(req('state',token=player['code'])))
+                player=req('state',token=token)
+                self.assertIsNone(player['relay'])
+                problem=next(p for p in PROBLEMS if p['id']==player['problem']['id'])
+                accepted=req('submit',{'epoch':player['epoch'],'match_id':mid,'rev':player['draft']['rev'],
+                                       'code':reference_code(problem)},token=token)
+                self.assertEqual(accepted['last_submission']['verdict'],'정답')
+                done=req('state')
                 self.assertEqual(done['phase'],'finished')
                 self.assertEqual(done['matches'][0]['winner'],2)
                 self.assertEqual(len(done['completed_matches']),11)

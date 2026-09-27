@@ -82,3 +82,19 @@ acceptDraft({match_id:3,rev:3,code:'submitted code'});`,context);
 assert.equal(vm.runInContext('editState.code',context),'new edits');
 assert.equal(vm.runInContext('editState.rev',context),3);
 assert.equal(vm.runInContext('editState.dirty',context),true);
+
+// Literal input remains copyable; whitespace symbols are a separate view.
+const sampleHtml=vm.runInContext(`sampleHTML('예제', '2 3\\n<tag>\\n')`,context);
+assert.ok(sampleHtml.includes('2 3\n&lt;tag&gt;'));
+assert.ok(sampleHtml.includes('2␠3↵'));
+assert.ok(sampleHtml.includes('<details'));
+// A final Lv5 player can submit before the Lv4 relay has been revealed.
+const nodes=new Map();
+element.querySelector=selector=>{
+  if(!nodes.has(selector))nodes.set(selector,{style:{}});
+  return nodes.get(selector);
+};
+vm.runInContext(`view='play';busy=false;submitError='';state={draft:{freeze_until:0,cooldown_until:0},match:{round:6},me:{level:5,team_id:1},relay:null,judge_enabled:true,standings:[],hints:[]};updatePlay();`,context);
+assert.equal(nodes.get('#submit').disabled,false);
+assert.ok(nodes.get('#relay-box').innerHTML.includes('지금도 코드를 제출할 수 있습니다'));
+console.log('Problem whitespace and early final submission controls: OK');

@@ -158,84 +158,8 @@ print('A' if x<y else 'B' if y<x else 'TIE')''',[f'{p} {rng.randint(1,p)} {rng.r
         'N V(3≤N≤40, 0≤V≤300). 다음 줄 카드 값 N개(1~100).','가장 큰 합 또는 -1.','완전 탐색 / 조합','i<j<k인 세 인덱스만 확인하면 중복 선택을 피할 수 있습니다.',
         'n,v=map(int,input().split())\na=list(map(int,input().split()))\nans=-1\nfor i in range(n):\n    for j in range(i+1,n):\n        for k in range(j+1,n):\n            s=a[i]+a[j]+a[k]\n            if s<=v: ans=max(ans,s)\nprint(ans)',
         [f'{n} {rng.randint(0,300)}\n'+ ' '.join(map(str,a))+'\n' for n,a in arrays(3,40,1,100)])
-    for side in (6,7):
-        suffix='청색' if side==6 else '적색'
-        mode='min' if side==6 else 'max'
-        add(side,1,suffix+' 보급 창',f'연속한 정확히 K개 보급량의 합 중 {"최솟값" if side==6 else "최댓값"}을 구하라. 보급량은 음수일 수도 있다.',
-            'N K(1≤K≤N≤500). 다음 줄 보급량 N개(-100~100).','조건에 맞는 합.','슬라이딩 윈도우 / 누적합','처음 K개 합을 구하고 한 칸 이동할 때 빠진 값을 빼고 새 값을 더하세요.',
-            f'n,k=map(int,input().split())\na=list(map(int,input().split()))\ns=sum(a[:k])\nans=s\nfor i in range(k,n):\n    s+=a[i]-a[i-k]\n    ans={mode}(ans,s)\nprint(ans)',
-            [f'{n} {rng.randint(1,n)}\n'+ ' '.join(map(str,a))+'\n' for n,a in arrays(1,500,-100,100)],True)
-        directions='((1,0),(-1,0),(0,1),(0,-1))' if side==6 else '((1,1),(1,-1),(-1,1),(-1,-1))'
-        movement='상하좌우' if side==6 else '네 대각선 방향'
-        sol=f'''n=int(input())
-g=[input().strip() for _ in range(n)]
-q=[(0,0,0)]
-seen={{(0,0)}}
-head=0
-answer=-1
-while head<len(q):
-    r,c,d=q[head]
-    head+=1
-    if r==n-1 and c==n-1:
-        answer=d
-        break
-    for dr,dc in {directions}:
-        nr,nc=r+dr,c+dc
-        if 0<=nr<n and 0<=nc<n and g[nr][nc]=='0' and (nr,nc) not in seen:
-            seen.add((nr,nc))
-            q.append((nr,nc,d+1))
-print(answer)'''
-        cases=[]
-        for n in [2,3,4,5,6,7,8,9,10,3,6,10]:
-            g=[[rng.choice('0001') for _ in range(n)] for _ in range(n)]; g[0][0]=g[-1][-1]='0'
-            cases.append(str(n)+'\n'+'\n'.join(''.join(row) for row in g)+'\n')
-        add(side,2,suffix+' 전송 미로',f'N×N 격자에서 왼쪽 위에서 오른쪽 아래로 이동한다. {movement}으로 한 칸씩 움직이며 1인 칸에는 들어갈 수 없다.\n한 번 이동할 때 1회로 센다. 도착할 수 없으면 -1을 출력한다.'+(' 대각선 사이의 가로·세로 칸은 검사하지 않는다.' if side==7 else ''),
-            'N(2≤N≤10). 다음 N줄에 공백 없는 0,1 문자열. 시작과 도착 칸은 0이다.','최소 이동 횟수 또는 -1.','BFS / 최단 거리','방문 칸을 기록하며 큐에서 가까운 칸부터 꺼내세요.',sol,cases,True)
-        init='1' if side==6 else 'n'; change='1' if side==6 else '-1'
-        add(side,3,suffix+' 트리 암호',f'노드 번호 1~N의 완전 이진 트리에 중위 순회(왼쪽, 자신, 오른쪽) 순서로 {"1부터 N까지 증가하는" if side==6 else "N부터 1까지 감소하는"} 값을 저장한다.\n루트에 저장된 값과 노드 K에 저장된 값을 출력하라. 자식 번호가 N을 넘으면 그 자식은 없다.',
-            'N K(1≤K≤N≤500).','루트 값과 K번 노드 값, 공백 구분.','이진 트리 / 중위 순회','노드 번호와 노드에 저장하는 값을 구분하고 순회 중 현재 값을 배정하세요.',
-            f'n,k=map(int,input().split())\na=[0]*(n+1)\nvalue=[{init}]\ndef visit(i):\n    if i>n: return\n    visit(i*2)\n    a[i]=value[0]\n    value[0]+={change}\n    visit(i*2+1)\nvisit(1)\nprint(a[1],a[k])',
-            [f'{n} {rng.randint(1,n)}\n' for n in [1,2,3,4,5,7,8,10,31,50,100,500,255,256]],True)
-        direction_note='1번에서 2~N번 각각으로 가는' if side==6 else '1~N-1번 각각에서 N번으로 가는'
-        sol='''import heapq
-n,m=map(int,input().split())
-g=[[] for _ in range(n+1)]
-for _ in range(m):
-    u,v,w=map(int,input().split())
-    EDGE
-start=START
-dist=[10**9]*(n+1)
-dist[start]=0
-q=[(0,start)]
-while q:
-    cost,u=heapq.heappop(q)
-    if cost!=dist[u]: continue
-    for v,w in g[u]:
-        if cost+w<dist[v]:
-            dist[v]=cost+w
-            heapq.heappush(q,(dist[v],v))
-print(*VALUES)'''.replace('EDGE','g[u].append((v,w))' if side==6 else 'g[v].append((u,w))').replace('START','1' if side==6 else 'n').replace('VALUES','dist[2:]' if side==6 else 'dist[1:n]')
-        cases=[relay_case(side,rng.randint(5,16),rng) for _ in range(14)]
-        add(side,4,suffix+' 경로 해독',f'방향이 있는 도로의 통행료가 주어진다. {direction_note} 최소 통행료를 번호 순서대로 구하라. 모든 해당 경로는 존재한다.\n정답을 제출하면 서버가 별도로 검사한 팀 전용 경로 비용 목록을 레벨 5 담당자에게 전달한다. 직접 채팅으로 전달할 필요는 없다.',
-            'N M(5≤N≤16, N-1≤M≤60). 다음 M줄 u v w(1≤u,v≤N, u≠v, 1≤w≤30). 중복 도로가 가능하다.','N-1개의 최소 비용을 공백으로 구분해 출력한다.','최단 경로 / 다익스트라',
-            'A형은 출발점에서 탐색하세요. B형은 모든 도로를 뒤집고 도착점에서 탐색하면 각 출발점의 비용을 한 번에 구할 수 있습니다.',sol,cases,True)
-        extremum='최소' if side==6 else '최대'
-        sol=f'''n,k=map(int,input().split())
-a=list(map(int,input().split()))
-answers=[]
-def dfs(i,count,total):
-    if count==k:
-        answers.append(total)
-        return
-    if i>=n: return
-    dfs(i+1,count,total)
-    dfs(i+2,count+1,total+a[i])
-dfs(0,0,0)
-print({mode}(answers))'''
-        cases=[f'{n} {rng.randint(1,(n+1)//2)}\n'+ ' '.join(map(str,a))+'\n' for n,a in arrays(4,15,1,450)]
-        add(side,5,suffix+' 최종 장치',f'일렬로 놓인 N개 장치에서 정확히 K개를 선택한다. 바로 이웃한 두 장치를 동시에 선택할 수 없다. 첫 장치와 마지막 장치는 이웃이 아니다.\n선택한 장치 비용 합의 {extremum}값을 구하라.\n일반 입력 형식과 예제로 코드를 미리 작성할 수 있다. 승리 판정에는 레벨 4 정답 후 공개되는 팀 전용 비용 목록을 사용하는 최종 검증이 추가된다. 그 전에는 레벨 5 제출이 잠겨 있다.',
-            'N K(4≤N≤15, 1≤K≤(N+1)//2). 다음 줄 양의 비용 N개(1~450).','조건에 맞는 '+extremum+' 비용 합.','백트래킹 / 조합',
-            '현재 장치를 고르면 다음 장치는 건너뛰세요. 고른 개수가 K일 때 비용 합을 후보에 넣으세요.',sol,cases,True)
+    from final_bank import build_final
+    bank.extend(build_final())
     return sorted(bank,key=lambda p:(p['set'],p['level']))
 
 

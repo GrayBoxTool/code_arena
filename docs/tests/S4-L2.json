@@ -1,0 +1,35 @@
+{
+  "id": "S4-L2",
+  "files": [
+    {
+      "public": true,
+      "input": "2\nABBA\nABCA\n",
+      "output": "#1 0\n#2 4\n"
+    },
+    {
+      "public": false,
+      "input": "3\nA\nAA\nABC\n",
+      "output": "#1 1\n#2 0\n#3 3\n"
+    },
+    {
+      "public": false,
+      "input": "3\nABCCBA\nAAAAA\nCBAACBAABBCBCCBAABCACACABBBCBBCB\n",
+      "output": "#1 0\n#2 1\n#3 12\n"
+    },
+    {
+      "public": false,
+      "input": "3\nBABBBCABABBCBABACBCCBBABBBCACCBC\nACACABCBCBBBBABAAAAABCB\nBABBACCACACCCBAABBCAAABABACACABACCBBCCCBCCBCACCBACACCACAABCCACACCBBAABCCBBAABACBCCACBBBBCBB\n",
+      "output": "#1 20\n#2 15\n#3 19\n"
+    },
+    {
+      "public": false,
+      "input": "3\nACAACACBBAAACCCBBABCCCBBABABCAACCCCBAABCACBBABBAAABCCAACACCC\nBBABAABCCBBCBCBABCABBAABBABACBABAAABBBACAABACAAAABABAAAACACCABBCABCBBACBACBABCBCAB\nBCBCACACCABCAACAABCBBBCABCCB\n",
+      "output": "#1 16\n#2 40\n#3 8\n"
+    },
+    {
+      "public": false,
+      "input": "3\nBAAACC\nBACCBBBCBCAABCACCABBCBBBCCBBABABCBCBBACCAAACCACCBBCBBBABCBACABBACCBCBCCBBABBCABBAACBCAABCABAACCA\nCBACCCBCCBBBCCCBACBBBCCACCCCABCBACABCCABCAAACBBBBACBBCBC\n",
+      "output": "#1 2\n#2 36\n#3 18\n"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "FA-L3",
+  "files": [
+    {
+      "public": true,
+      "input": "2\n5 2\n1 1\n",
+      "output": "#1 4 2\n#2 1 1\n"
+    },
+    {
+      "public": false,
+      "input": "3\n2 2\n3 2\n4 4\n",
+      "output": "#1 2 1\n#2 2 1\n#3 3 1\n"
+    },
+    {
+      "public": false,
+      "input": "3\n7 3\n8 2\n10 5\n",
+      "output": "#1 4 6\n#2 5 3\n#3 7 6\n"
+    },
+    {
+      "public": false,
+      "input": "3\n31 17\n50 44\n100 31\n",
+      "output": "#1 16 3\n#2 32 25\n#3 64 99\n"
+    },
+    {
+      "public": false,
+      "input": "3\n500 333\n255 15\n256 61\n",
+      "output": "#1 256 155\n#2 128 240\n#3 129 237\n"
+    }
+  ]
+}

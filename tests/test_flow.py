@@ -41,14 +41,17 @@ class ProblemsTest(unittest.TestCase):
                     for i in range(n): d[i][i]=0
                     for line in lines[1:]:
                         a,b,w=map(int,line.split());d[a-1][b-1]=min(d[a-1][b-1],w)
+                        if p['set']==7: d[b-1][a-1]=min(d[b-1][a-1],w)
                     for k in range(n):
                         for i in range(n):
-                            for j in range(n): d[i][j]=min(d[i][j],d[i][k]+d[k][j])
-                    expected=d[0][1:] if p['set']==6 else [d[i][n-1] for i in range(n-1)]
+                            for j in range(n):
+                                candidate=d[i][k]+d[k][j] if p['set']==6 else max(d[i][k],d[k][j])
+                                d[i][j]=min(d[i][j],candidate)
+                    expected=d[0][1:]
                 else:
                     n,k=map(int,lines[0].split()); a=list(map(int,lines[1].split()))
-                    sums=[sum(a[i] for i in subset) for subset in itertools.combinations(range(n),k) if all(y-x>1 for x,y in zip(subset,subset[1:]))]
-                    expected=[min(sums) if p['set']==6 else max(sums)]
+                    sums=[sum(a[i] for i in subset) for subset in itertools.combinations(range(n),k) if p['set']==7 or all(y-x>1 for x,y in zip(subset,subset[1:]))]
+                    expected=[min(sums) if p['set']==6 else min(abs(sum(a)-2*s) for s in sums)]
                 actual=expected_outputs(p|{'cases':[case]})[0].strip().split()[1:]
                 self.assertEqual(list(map(int,actual)),expected)
 
@@ -151,7 +154,10 @@ class FlowTest(unittest.TestCase):
                 self.assertEqual(len(final['matches']),1)
                 a,b=tokens[0],tokens[1]
                 self.assertNotEqual(req('state',a[0])['problem']['id'],req('state',b[0])['problem']['id'])
-                self.assertIn('레벨 4',submit(a[4])['error'])
+                early=submit(a[4],'print("wrong")')
+                self.assertEqual(early['last_submission']['verdict'],'오답')
+                self.assertIsNone(early['relay'])
+                mutate('UPDATE drafts SET cooldown_until=0')
                 submit(a[0]);freeze=action('item',a[0]);self.assertFalse(freeze['item_available'])
                 self.assertIn('빙결',write(b[3],'x=1')['error'])
                 self.assertTrue(all(x['freeze_until']>time.time() for x in req('state')['matches'][0]['teams'][1]['members']))

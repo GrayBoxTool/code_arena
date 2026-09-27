@@ -1,0 +1,30 @@
+{
+  "id": "S1-L2",
+  "files": [
+    {
+      "public": true,
+      "input": "2\n([])\n([)]\n",
+      "output": "#1 YES\n#2 NO\n"
+    },
+    {
+      "public": false,
+      "input": "3\n(([]))\n]\n(()\n",
+      "output": "#1 YES\n#2 NO\n#3 NO\n"
+    },
+    {
+      "public": false,
+      "input": "3\n[][]()\n([[]])()\n()[]\n",
+      "output": "#1 YES\n#2 YES\n#3 YES\n"
+    },
+    {
+      "public": false,
+      "input": "3\n[(])\n((((()))))\n([][])[()]\n",
+      "output": "#1 NO\n#2 YES\n#3 YES\n"
+    },
+    {
+      "public": false,
+      "input": "1\n(((()\n",
+      "output": "#1 NO\n"
+    }
+  ]
+}

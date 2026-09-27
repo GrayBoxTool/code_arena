@@ -226,8 +226,6 @@ def simulate_result(c,match_id,team_id,level,verdict):
     uid=row['id']; p=problem_for(m,team_id,level)
     if (epoch(c),m['id'],uid) in SUBMITTING:raise ValueError('해당 선수의 실제 채점이 진행 중입니다.')
     if c.execute('SELECT 1 FROM solves WHERE match_id=? AND user_id=?',(m['id'],uid)).fetchone():raise ValueError('이미 정답 처리한 선수입니다.')
-    if verdict=='correct' and m['round']==6 and level==5 and not c.execute("SELECT 1 FROM solves WHERE match_id=? AND team_id=? AND problem_id LIKE '%-L4'",(m['id'],team_id)).fetchone():
-        raise ValueError('결승 Lv5는 같은 팀 Lv4를 먼저 정답 처리해야 합니다.')
     now=time.time()
     if verdict=='wrong':
         c.execute('INSERT INTO submissions(match_id,user_id,problem_id,at,verdict,passed,total,code) VALUES (?,?,?,?,?,?,?,?)',
@@ -651,7 +649,6 @@ class Handler(BaseHTTPRequestHandler):
             u=self.user(c); tick(c); check_epoch(c,b); m,l,d=active_player(c,u); check_freeze(d)
             if d['cooldown_until']>time.time(): raise ValueError('재제출 대기시간이 남아 있습니다.')
             if c.execute('SELECT 1 FROM solves WHERE match_id=? AND user_id=?',(m['id'],u['id'])).fetchone(): raise ValueError('이미 해결한 문제입니다.')
-            if m['round']==6 and l==5 and not c.execute("SELECT 1 FROM solves WHERE match_id=? AND team_id=? AND problem_id LIKE '%-L4'",(m['id'],u['team_id'])).fetchone(): raise ValueError('레벨 4의 검증 데이터 공개 후 제출할 수 있습니다.')
             if not judge_enabled(): raise ValueError('OpenAI 채점 설정과 API 키를 확인하세요.')
             if b.get('match_id')!=m['id'] or b.get('rev')!=d['rev']: raise ValueError('코드가 변경되었습니다. 동기화 후 다시 제출하세요.')
             code=valid_code(b.get('code')); ep=epoch(c); key=(ep,m['id'],u['id'])
