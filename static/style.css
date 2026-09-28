@@ -133,3 +133,5 @@
 @keyframes winnerGlow{0%,100%{box-shadow:0 0 10px #e8bd5133}50%{box-shadow:0 0 30px #e8bd5180}}
 @media(max-width:900px){.inspect-problem{max-height:32dvh}.inspect-editor .inspect-code{max-height:32dvh}.inspect-grid{overflow:auto}}
 @media(max-width:760px){.player-grid .problem-wrap #problem-content{max-height:45dvh;min-height:180px}.player-grid>.column:nth-child(2){position:static}}
+
+.problem-figure{margin:20px 0;padding:14px;background:#f8fafc;border-radius:10px;color:#334155}.problem-figure img{display:block;max-width:100%;height:auto;margin:0 auto;background:white}.problem-figure img[src$=".svg"]{width:100%}.problem-figure figcaption{margin-top:12px;font-size:.88rem;line-height:1.6;text-align:center;color:#334155}

@@ -122,7 +122,7 @@ OpenAI 채점 연결과 경기 기록 저장은 별개입니다. 무료 Render�
 
 이번 변경에는 문제 데이터뿐 아니라 Lv5 제출 제한을 없애는 서버·화면 수정이 포함됩니다. **문제 파일만 교체하지 말고 Render와 Netlify를 함께 재배포하세요.**
 
-- GitHub에 압축본의 Python 파일 전체를 반영하세요. 새 파일 `rumble_bank.py`, `final_bank.py`, `export_problem_files.py`와 `source_cases.json`도 포함해야 합니다.
+- GitHub에 압축본의 Python 파일 전체를 반영하세요. 새 파일 `rumble_bank.py`, `final_bank.py`, `export_problem_files.py`와 `source_cases.json`와 `problem_figures.json`도 포함해야 합니다.
 - 기존 `static/config.js`의 실제 Render 주소를 유지하고, 수정된 `static/app.js`와 `static/style.css`를 Netlify에 배포하세요.
 - Render의 `OPENAI_API_KEY`, `ACCESS_SEED` 등 기존 환경 변수는 유지하세요. API 키를 다시 발급할 필요는 없습니다.
 - 새로운 문제로 시험할 때에는 진행 중인 대회를 끝내고, 운영자 화면에서 전체 초기화 후 리허설을 시작하세요. 이전 문제의 점수·정답 기록과 새 문제를 섞지 않기 위한 절차입니다.
@@ -135,3 +135,6 @@ OpenAI 채점 연결과 경기 기록 저장은 별개입니다. 무료 Render�
 이번 파일은 화면 스크롤, 운영자 실시간 코드 관전, 승리 강조, 결승 승점 합산, 마지막 내용 있는 두 줄 삭제를 반영했습니다. 재업로드된 25개 문제로 럼블을 교체했고 결승 10문제도 새로 작성했습니다. 결승은 선착·후착 구분 없이 같은 승점이며, 동점은 남은 solve 잔액으로 판정합니다. 긴 예제는 두 사례의 일부를 최대 10줄로 표시하고 전체 보기는 제공하지 않습니다.
 
 프론트엔드와 백엔드가 모두 바뀌었으므로 Render와 Netlify를 함께 재배포하세요. 결승 규칙이 달라졌으므로 기존 경기가 끝난 뒤 적용하고 새 대회로 시험하세요.
+
+
+문제 그림은 `static/problem-images/`에 포함되어 있습니다. 이 폴더까지 Netlify에 배포하고, `problem_figures.json`을 Python 파일과 함께 Render에 반영하세요. 원본 6문제의 그림 11장과 결승 4문제의 도식이 포함됩니다. 참가자 화면과 운영자 문제 보기, 문제 문서에서 ‘테스트케이스 하나의 입력 형식’과 ‘예제 해설’ 구역은 제거했습니다.

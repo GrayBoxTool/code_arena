@@ -1,0 +1,97 @@
+{
+  "S2-L2": [
+    {
+      "src": "/problem-images/S2-L2-1.png",
+      "alt": "두 숫자열의 배치",
+      "caption": "두 숫자열의 배치"
+    },
+    {
+      "src": "/problem-images/S2-L2-2.png",
+      "alt": "짧은 숫자열을 오른쪽으로 이동한 배치",
+      "caption": "짧은 숫자열을 오른쪽으로 이동한 배치"
+    },
+    {
+      "src": "/problem-images/S2-L2-3.png",
+      "alt": "마주 보는 값끼리 곱하는 방법",
+      "caption": "마주 보는 값끼리 곱하는 방법"
+    }
+  ],
+  "S2-L1": [
+    {
+      "src": "/problem-images/S2-L1-1.png",
+      "alt": "A사와 B사의 사용량별 요금 구조",
+      "caption": "A사와 B사의 사용량별 요금 구조"
+    }
+  ],
+  "S4-L4": [
+    {
+      "src": "/problem-images/S4-L4-1.png",
+      "alt": "대각선 순서에 따른 좌표와 번호",
+      "caption": "대각선 순서에 따른 좌표와 번호"
+    }
+  ],
+  "S5-L5": [
+    {
+      "src": "/problem-images/S5-L5-1.png",
+      "alt": "물건별 크기와 가격을 나타낸 설명용 표",
+      "caption": "물건별 크기와 가격을 나타낸 설명용 표"
+    }
+  ],
+  "S1-L5": [
+    {
+      "src": "/problem-images/S1-L5-1.png",
+      "alt": "현재 색, 변경할 칸(X), 완성된 세 색 구역",
+      "caption": "현재 색, 변경할 칸(X), 완성된 세 색 구역"
+    }
+  ],
+  "S2-L5": [
+    {
+      "src": "/problem-images/S2-L5-1.png",
+      "alt": "초기 수열과 시작 위치",
+      "caption": "초기 수열과 시작 위치"
+    },
+    {
+      "src": "/problem-images/S2-L5-2.png",
+      "alt": "첫 번째 삽입 위치",
+      "caption": "첫 번째 삽입 위치"
+    },
+    {
+      "src": "/problem-images/S2-L5-3.png",
+      "alt": "두 번째 삽입 위치",
+      "caption": "두 번째 삽입 위치"
+    },
+    {
+      "src": "/problem-images/S2-L5-4.png",
+      "alt": "끝을 지나 처음으로 돌아오는 세 번째 삽입",
+      "caption": "끝을 지나 처음으로 돌아오는 세 번째 삽입"
+    }
+  ],
+  "FA-L5": [
+    {
+      "src": "/problem-images/FA-L5-1.svg",
+      "alt": "구역의 높이는 달라도 되지만 순서가 고정되며 빈 구역은 허용되지 않습니다.",
+      "caption": "구역의 높이는 달라도 되지만 순서가 고정되며 빈 구역은 허용되지 않습니다."
+    }
+  ],
+  "FB-L5": [
+    {
+      "src": "/problem-images/FB-L5-1.svg",
+      "alt": "마지막 장치와 첫 장치도 이어져 있습니다. 노란색은 이 경계의 두 장치를 강조한 것이며 선택 결과가 아닙니다.",
+      "caption": "마지막 장치와 첫 장치도 이어져 있습니다. 노란색은 이 경계의 두 장치를 강조한 것이며 선택 결과가 아닙니다."
+    }
+  ],
+  "FB-L2": [
+    {
+      "src": "/problem-images/FB-L2-1.svg",
+      "alt": "A 5, B 3, A 2를 펼친 문자열입니다. 색칠된 부분만 조회 대상으로 삼습니다.",
+      "caption": "A 5, B 3, A 2를 펼친 문자열입니다. 색칠된 부분만 조회 대상으로 삼습니다."
+    }
+  ],
+  "FB-L3": [
+    {
+      "src": "/problem-images/FB-L3-1.svg",
+      "alt": "작업은 기존 점수에 값을 더합니다. 뒤 작업이 앞 작업의 점수를 덮어쓰지 않습니다.",
+      "caption": "작업은 기존 점수에 값을 더합니다. 뒤 작업이 앞 작업의 점수를 덮어쓰지 않습니다."
+    }
+  ]
+}

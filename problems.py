@@ -47,10 +47,11 @@ def expected_outputs(problem):
 
 def public_problem(problem):
     fields=("id", "set", "level", "title", "statement", "input", "output",
-            "constraints", "input_format", "output_format", "sample_explanation")
+            "constraints", "output_format")
     result={k:problem[k] for k in fields}
+    result["figures"]=problem.get("figures",[])
     result["input"]=("전체 입력의 첫 줄에는 테스트케이스 수 T가 주어집니다. (1 ≤ T ≤ 3)\n"
-                     "이후 아래 형식의 테스트케이스가 T개 이어집니다. 테스트케이스 사이에 빈 줄은 없습니다.\n\n"
+                     "이후 아래 설명에 따라 테스트케이스가 T개 이어집니다. 테스트케이스 사이에 빈 줄은 없습니다.\n\n"
                      +result["input"]+"\n\n한 줄의 여러 값은 공백으로 구분됩니다. 문자열·지도 행의 공백 여부는 위 설명을 따르세요.")
     result["output"]=("각 테스트케이스마다 한 줄에 #과 테스트케이스 번호 tc를 붙여 출력하고, 공백 한 칸 뒤에 정답을 출력합니다.\n"
                       "tc는 1부터 시작합니다. 예: #1 10\n\n"+result["output"])
@@ -61,7 +62,11 @@ def public_problem(problem):
 from rumble_bank import build_rumble
 from final_bank import build_final
 PROBLEMS = build_rumble() + build_final()
+import json
+from pathlib import Path
+_FIGURES=json.loads(Path(__file__).with_name("problem_figures.json").read_text(encoding="utf-8"))
 for p in PROBLEMS:
+    p["figures"]=_FIGURES.get(p["id"],[])
     p['output_format'] = '#tc\n결과 문자열을 10글자씩 출력' if p.get('output_mode')=='block' else '#tc answer'
 
 def public_samples(p):

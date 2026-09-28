@@ -33,7 +33,7 @@ class RehearsalTest(unittest.TestCase):
     def test_solo_rehearsal_and_finalist_tie(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
-            for source in BASE.glob('*.py'): shutil.copy(source,root)
+            for source in list(BASE.glob('*.py'))+list(BASE.glob('*.json')): shutil.copy(source,root)
             shutil.copytree(BASE/'static',root/'static')
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1',0))

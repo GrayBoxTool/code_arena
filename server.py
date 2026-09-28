@@ -501,8 +501,8 @@ class Handler(BaseHTTPRequestHandler):
                                 'draft':dict(draft(c,m['id'],uid)),'accepted_code':accepted[0] if accepted else None,'last':dict(last) if last else None}
                 return self.send(result)
             target=ROOT/'static'/('index.html' if path=='/' else path.lstrip('/'))
-            if target.parent!=ROOT/'static' or target.suffix not in ('.html','.css','.js','.svg') or not target.exists(): return self.send({'error':'찾을 수 없습니다.'},404)
-            data=target.read_bytes(); self.send_response(200); self.send_header('Content-Type',{'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml'}[target.suffix]+'; charset=utf-8'); self.send_header('Content-Length',str(len(data))); self.send_header('Cache-Control','no-store'); self.end_headers(); self.wfile.write(data)
+            if not (target.resolve().is_relative_to((ROOT/'static').resolve()) and (target.parent==ROOT/'static' or target.parent==ROOT/'static'/'problem-images')) or target.suffix not in ('.html','.css','.js','.svg','.png') or not target.is_file(): return self.send({'error':'찾을 수 없습니다.'},404)
+            data=target.read_bytes(); self.send_response(200); self.send_header('Content-Type',{'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'}[target.suffix]+'; charset=utf-8'); self.send_header('Content-Length',str(len(data))); self.send_header('Cache-Control','no-store'); self.end_headers(); self.wfile.write(data)
         except PermissionError as e: self.send({'error':str(e)},401)
         except (ValueError,TypeError) as e: self.send({'error':str(e)},400)
         except Exception as e:

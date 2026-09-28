@@ -96,7 +96,7 @@ class FlowTest(unittest.TestCase):
     def test_complete_tournament(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
-            for p in BASE.glob('*.py'): shutil.copy(p,root)
+            for p in list(BASE.glob('*.py'))+list(BASE.glob('*.json')): shutil.copy(p,root)
             shutil.copytree(BASE/'static',root/'static')
             with socket.socket() as sock: sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
             env=os.environ|{'PORT':str(port),'HOST':'127.0.0.1','JUDGE_PROVIDER':'local','RUMBLE_DATA_DIR':str(root/'data'),'ACCESS_SEED':'integration-seed-with-more-than-32-characters'}
