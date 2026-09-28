@@ -1,0 +1,140 @@
+{
+  "admin": "8xgn5f53xyyUpC_UivyDu1vNOM9Dve6N",
+  "teams": {
+    "블루": [
+      {
+        "name": "블루 1번",
+        "level": 1,
+        "code": "0kKnzv_bsg2nSGv1cj1h4mbbTrPvpLsq"
+      },
+      {
+        "name": "블루 2번",
+        "level": 2,
+        "code": "Gvl5wzaaaW7sheSnTRAZIOQPEIqiuzyv"
+      },
+      {
+        "name": "블루 3번",
+        "level": 3,
+        "code": "aD3nFR2UkWb6qSM-ZBU2EGM1DouAD9rd"
+      },
+      {
+        "name": "블루 4번",
+        "level": 4,
+        "code": "Yzu-5aqswUzH6QsW977DDLrjwO9S5MgY"
+      },
+      {
+        "name": "블루 5번",
+        "level": 5,
+        "code": "JKciC2Jb_vkEyDb3QTXiK1F95Zc88dv6"
+      }
+    ],
+    "레드": [
+      {
+        "name": "레드 1번",
+        "level": 1,
+        "code": "HKENiw1u6PceF2iPrTdq7pQYaJ2rmfpl"
+      },
+      {
+        "name": "레드 2번",
+        "level": 2,
+        "code": "svHdfvjJPxWH8z4H0aDQho9Ifj5Uo4wy"
+      },
+      {
+        "name": "레드 3번",
+        "level": 3,
+        "code": "VXDSBI9Ig686niuKJuNxtMPriVN9ASF5"
+      },
+      {
+        "name": "레드 4번",
+        "level": 4,
+        "code": "NtjV7IiogDM1FEp8ccgDdCFSopvGUGWR"
+      },
+      {
+        "name": "레드 5번",
+        "level": 5,
+        "code": "jYT8fGYOIbOOZouFXUoDYNB_va8XII9n"
+      }
+    ],
+    "골드": [
+      {
+        "name": "골드 1번",
+        "level": 1,
+        "code": "nPRpd6nsPl5thDw3pnPw4g5q7fWwoKcj"
+      },
+      {
+        "name": "골드 2번",
+        "level": 2,
+        "code": "9bTFiO7SfwT1uRj1jjxM1eSSFY8evg3l"
+      },
+      {
+        "name": "골드 3번",
+        "level": 3,
+        "code": "qRc0vB7Bc-ejYbM7TzvszJ1XjigBrlBM"
+      },
+      {
+        "name": "골드 4번",
+        "level": 4,
+        "code": "NW1iVB_Hgmp4SnQMYFd9-6go_br6r3g0"
+      },
+      {
+        "name": "골드 5번",
+        "level": 5,
+        "code": "iCGhXgYmctONaY8AlEPbArBVNUe0sHtz"
+      }
+    ],
+    "바이올렛": [
+      {
+        "name": "바이올렛 1번",
+        "level": 1,
+        "code": "C3Nakv7t-V5Xg0NcdEQ4wCrjVc826t2a"
+      },
+      {
+        "name": "바이올렛 2번",
+        "level": 2,
+        "code": "IxLuaXDyfQLfOhFW3lrkNANUB5AHqM0V"
+      },
+      {
+        "name": "바이올렛 3번",
+        "level": 3,
+        "code": "CVchNkOCbqnSuzpK_UHeG4XoisLwnLiG"
+      },
+      {
+        "name": "바이올렛 4번",
+        "level": 4,
+        "code": "h8LMANJqXcdCQuz2qHBNw304BB9tx1a9"
+      },
+      {
+        "name": "바이올렛 5번",
+        "level": 5,
+        "code": "CLJyxbpPm1frLM7c_IVaLtPPjS8C3qNu"
+      }
+    ],
+    "민트": [
+      {
+        "name": "민트 1번",
+        "level": 1,
+        "code": "nacZmV3P5NQAdoYD4AIpZhZDajhA5Zj9"
+      },
+      {
+        "name": "민트 2번",
+        "level": 2,
+        "code": "roPwA5ebbnjBnmXVr-0XIcKCg06W0aM6"
+      },
+      {
+        "name": "민트 3번",
+        "level": 3,
+        "code": "Cz-SBO75wBsdzE9mJdspXWHz9DYfewgq"
+      },
+      {
+        "name": "민트 4번",
+        "level": 4,
+        "code": "ehqdNeCBQtwixAVm3RoX2s4h9wAdSSl6"
+      },
+      {
+        "name": "민트 5번",
+        "level": 5,
+        "code": "__ypexbDxA76dVafNA0AR0Mhlj53HrBk"
+      }
+    ]
+  }
+}
