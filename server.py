@@ -27,8 +27,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
-from problems import PROBLEMS, REWARD, HINT_COST, public_problem, judge_inputs, expected_outputs
-from bank_v2 import relay_case
+from problems import public_samples, PROBLEMS, REWARD, HINT_COST, public_problem, judge_inputs, expected_outputs
 from services import judge, assist
 
 ROOT=Path(__file__).resolve().parent
@@ -168,9 +167,12 @@ def event(c,m,team,user,kind,detail):
 
 def close_match(c,m,winner=None,reason='time'):
     if m['settled']: return
-    if m['round']<=5:
-        a,b=points(c,m['id'],m['team_a']),points(c,m['id'],m['team_b'])
-        winner=m['team_a'] if a>b else m['team_b'] if b>a else None
+    a,b=points(c,m['id'],m['team_a']),points(c,m['id'],m['team_b'])
+    winner=m['team_a'] if a>b else m['team_b'] if b>a else None
+    if m['round']==6 and winner is None:
+        ca,cb=balance(c,m['team_a']),balance(c,m['team_b'])
+        winner=m['team_a'] if ca>cb else m['team_b'] if cb>ca else None
+        if winner: reason='solve_tiebreak'
     bonus=100 if m['round']<=5 and winner else 0
     c.execute("UPDATE matches SET status='closed',end_at=MIN(COALESCE(end_at,?),?),winner=?,bonus=?,settled=1,reason=? WHERE id=?",
               (time.time(),time.time(),winner,bonus,reason,m['id']))
@@ -215,6 +217,13 @@ def ensure_final(c):
 
 def rehearsal(c): return setting(c,'rehearsal','0')=='1'
 
+def award_points(c,m,level):
+    if m["round"]==6: return REWARD[level]
+    # Final teams have distinct question IDs; first/second is compared by level.
+    prior=c.execute('SELECT 1 FROM solves WHERE match_id=? AND problem_id LIKE ?',
+                    (m['id'],f'%-L{level}')).fetchone()
+    return REWARD[level]//2 if prior else REWARD[level]
+
 def simulate_result(c,match_id,team_id,level,verdict):
     if not rehearsal(c) or setting(c,'phase')!='live': raise ValueError('진행 중인 리허설 경기에서만 사용할 수 있습니다.')
     m=c.execute("SELECT * FROM matches WHERE id=? AND round=? AND status='open'",(match_id,current_round(c))).fetchone()
@@ -233,8 +242,7 @@ def simulate_result(c,match_id,team_id,level,verdict):
         c.execute('UPDATE drafts SET cooldown_until=? WHERE match_id=? AND user_id=?',(now+10,m['id'],uid))
         event(c,m['id'],team_id,uid,'wrong',f'리허설 Lv{level} 오답')
     else:
-        prior=c.execute('SELECT 1 FROM solves WHERE match_id=? AND problem_id=?',(m['id'],p['id'])).fetchone()
-        score=REWARD[level]//2 if prior and m['round']<=5 else REWARD[level]
+        score=award_points(c,m,level)
         c.execute('INSERT INTO submissions(match_id,user_id,problem_id,at,verdict,passed,total,code) VALUES (?,?,?,?,?,?,?,?)',
                   (m['id'],uid,p['id'],now,'정답',len(judge_inputs(p)),len(judge_inputs(p)),'# 운영자 리허설 정답 · 실제 제출 코드 아님'))
         c.execute('INSERT INTO solves(match_id,team_id,user_id,problem_id,at,win_points,solve_points) VALUES (?,?,?,?,?,?,?)',
@@ -242,7 +250,6 @@ def simulate_result(c,match_id,team_id,level,verdict):
         c.execute('INSERT INTO credits(team_id,amount,available_round,reason,at) VALUES (?,?,?,?,?)',
                   (team_id,REWARD[level],m['round'],'리허설 '+p['id'],now))
         event(c,m['id'],team_id,uid,'solve',f'리허설 Lv{level} 정답 · +{score} 승점')
-        if m['round']==6 and level==5:close_match(c,m,team_id,'level5');tick(c)
 
 def problem_for(m,team,level):
     if m['round']==6: return LOOKUP[f'F{"A" if team==m["team_a"] else "B"}-L{level}']
@@ -257,14 +264,8 @@ def draft(c,mid,uid):
     return c.execute('SELECT * FROM drafts WHERE match_id=? AND user_id=?',(mid,uid)).fetchone()
 
 def public(p):
-    return public_problem(p)|{'reward':REWARD[p['level']], 'sample_input':judge_inputs(p)[0], 'sample_output':expected_outputs(p)[0]}
+    return public_problem(p)|{'reward':REWARD[p['level']], **public_samples(p)}
 
-def relay_problem(c,m,team,level):
-    p=dict(problem_for(m,team,level))
-    if m['round']==6 and level in (4,5):
-        r=c.execute('SELECT * FROM relays WHERE match_id=? AND team_id=?',(m['id'],team)).fetchone()
-        p['cases']=p['cases']+[r['input'] if level==4 else r['level5_input']]
-    return p
 
 def match_view(c,m,admin=False):
     teams=[]
@@ -320,10 +321,6 @@ def snapshot(c,user):
     hints=[dict(h) for h in c.execute('SELECT problem_id,kind,detail,cost FROM purchases WHERE match_id=? AND user_id=?',(m['id'],user['id']))] if m else []
     solved=c.execute('SELECT * FROM solves WHERE match_id=? AND user_id=?',(m['id'],user['id'])).fetchone() if m else None
     last=c.execute('SELECT verdict,passed,total,at FROM submissions WHERE match_id=? AND user_id=? ORDER BY id DESC LIMIT 1',(m['id'],user['id'])).fetchone() if m else None
-    relay=None
-    if m and m['round']==6 and c.execute("SELECT 1 FROM solves WHERE match_id=? AND team_id=? AND problem_id LIKE '%-L4'",(m['id'],user['team_id'])).fetchone():
-        rr=c.execute('SELECT output,level5_input FROM relays WHERE match_id=? AND team_id=?',(m['id'],user['team_id'])).fetchone()
-        relay=dict(rr) if rr else None
     ev=[dict(e) for e in c.execute('SELECT * FROM events ORDER BY id DESC LIMIT 40')]
     if user['role']!='admin':
         ev=[e for e in ev if m and e['match_id']==m['id']]
@@ -340,7 +337,7 @@ def snapshot(c,user):
                'candidates':[dict(x) for x in c.execute('SELECT slot,source FROM logo_candidates WHERE team_id=? ORDER BY slot',(t['id'],))],
                'job':LOGO_JOBS.get(t['id'],{} )} if t else None),
             'match':match_view(c,m) if m else None,'problem':p,'draft':own_draft,'solved':dict(solved) if solved else None,
-            'last_submission':dict(last) if last else None,'hints':hints,'relay':relay,'events':list(reversed(ev)),
+            'last_submission':dict(last) if last else None,'hints':hints,'relay':None,'events':list(reversed(ev)),
             'assist_enabled':bool(os.environ.get('OPENAI_API_KEY')),
             'judge_enabled':judge_enabled(),'judge_provider':judge_provider(),
             'item_available':bool(m and m['round']==6 and level in (1,2,3) and solved and not c.execute('SELECT 1 FROM used_items WHERE match_id=? AND user_id=?',(m['id'],user['id'])).fetchone())}
@@ -395,10 +392,13 @@ def rename_variable(code):
     for a,b in sorted({(a,b) for n,a,b in occurrences if n==target},reverse=True): code=code[:a]+replacement+code[b:]
     return code,f'{target} → {replacement}'
 
-def erase_last_line(code):
+def erase_last_lines(code,count=2):
     lines=code.splitlines(keepends=True)
     for i in range(len(lines)-1,-1,-1):
-        if lines[i].strip(): del lines[i]; break
+        if lines[i].strip():
+            del lines[i]
+            count-=1
+            if count==0: break
     return ''.join(lines)
 
 def start_round(c):
@@ -418,13 +418,6 @@ def start_round(c):
             levels=[l for l in range(1,6) if l not in {x[1] for x in picked}]
             for uid,l in picked+list(zip(remain,levels)):
                 c.execute('INSERT INTO round_assignments VALUES (?,?,?,?)',(target,tid,uid,l)); draft(c,m['id'],uid)
-            if target==6:
-                side=6 if tid==m['team_a'] else 7
-                case=relay_case(side,12,random.Random(secrets.randbits(64)))
-                p=dict(problem_for(m,tid,4)); p['cases']=[case]
-                out=expected_outputs(p)[0].strip().split(' ',1)[1]
-                values=out.split(); relay_in=f'{len(values)} 4\n'+out+'\n'
-                c.execute('INSERT INTO relays VALUES (?,?,?,?,?)',(m['id'],tid,case,out,relay_in))
     now=time.time()
     c.execute("UPDATE matches SET start_at=?,end_at=?,status='open' WHERE round=?",(now,now+(600 if target==6 else 300),target))
     setval(c,'round',target); setval(c,'phase','live')
@@ -626,12 +619,12 @@ class Handler(BaseHTTPRequestHandler):
                         td=draft(c,m['id'],target['user_id']); code=td['code']
                         if l==1: c.execute('UPDATE drafts SET freeze_until=MAX(freeze_until,?),rev=rev+1 WHERE match_id=? AND user_id=?',(time.time()+20,m['id'],target['user_id']))
                         else:
-                            detail='마지막 코드 줄 삭제'
+                            detail='마지막 내용 있는 코드 두 줄 삭제'
                             if l==2: code,detail=rename_variable(code)
-                            else: code=erase_last_line(code)
+                            else: code=erase_last_lines(code)
                             c.execute('UPDATE drafts SET code=?,rev=rev+1,updated_at=? WHERE match_id=? AND user_id=?',(code,time.time(),m['id'],target['user_id']))
                     c.execute('INSERT INTO used_items VALUES (?,?,?,?)',(m['id'],u['id'],kind,time.time()))
-                    event(c,m['id'],opponent,u['id'],kind,{1:'상대 팀 20초 빙결',2:'상대 Lv4·5 변수 교란',3:'상대 Lv4·5 마지막 줄 삭제'}[l])
+                    event(c,m['id'],opponent,u['id'],kind,{1:'상대 팀 20초 빙결',2:'상대 Lv4·5 변수 교란',3:'상대 Lv4·5 마지막 내용 있는 두 줄 삭제'}[l])
                 elif path=='/api/hint':
                     check_epoch(c,b); m,l,d=active_player(c,u); check_freeze(d)
                     kind=b.get('kind'); p=problem_for(m,u['team_id'],l)
@@ -655,7 +648,7 @@ class Handler(BaseHTTPRequestHandler):
             if key in SUBMITTING: raise ValueError('이미 채점 중입니다.')
             SUBMITTING.add(key)
             c.execute('UPDATE drafts SET code=?,rev=rev+1,updated_at=? WHERE match_id=? AND user_id=?',(code,time.time(),m['id'],u['id']))
-            p=relay_problem(c,m,u['team_id'],l)
+            p=problem_for(m,u['team_id'],l)
         try:
             verdict,passed,total=judge_submission(code,p)
             with LOCK,db() as c:
@@ -665,12 +658,10 @@ class Handler(BaseHTTPRequestHandler):
                 now=time.time()
                 c.execute('INSERT INTO submissions(match_id,user_id,problem_id,at,verdict,passed,total,code) VALUES (?,?,?,?,?,?,?,?)',(m['id'],u['id'],p['id'],now,verdict,passed,total,code))
                 if verdict=='정답':
-                    prior=c.execute('SELECT 1 FROM solves WHERE match_id=? AND problem_id=?',(m['id'],p['id'])).fetchone()
-                    score=REWARD[l]//2 if prior and m['round']<=5 else REWARD[l]
+                    score=award_points(c,m,l)
                     c.execute('INSERT INTO solves(match_id,team_id,user_id,problem_id,at,win_points,solve_points) VALUES (?,?,?,?,?,?,?)',(m['id'],u['team_id'],u['id'],p['id'],now,score,REWARD[l]))
                     c.execute('INSERT INTO credits(team_id,amount,available_round,reason,at) VALUES (?,?,?,?,?)',(u['team_id'],REWARD[l],m['round'],p['id'],now))
                     event(c,m['id'],u['team_id'],u['id'],'solve',f'Lv{l} 정답 · +{score} 승점')
-                    if m['round']==6 and l==5: close_match(c,now_m,u['team_id'],'level5'); tick(c)
                 else:
                     c.execute('UPDATE drafts SET cooldown_until=? WHERE match_id=? AND user_id=?',(now+10,m['id'],u['id']))
                     event(c,m['id'],u['team_id'],u['id'],'wrong',f'Lv{l} {verdict.splitlines()[0]}')

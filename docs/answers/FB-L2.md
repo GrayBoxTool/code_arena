@@ -2,21 +2,16 @@
 
 ```python
 def solve_case():
-    s, e = map(int, input().split())
-    d = [-1] * 101
-    d[s] = 0
-    q = [s]
-    head = 0
-    while head < len(q):
-        x = q[head]
-        head += 1
-        if x == e:
-            break
-        for y in (x - 1, x + 1, x * 2):
-            if 0 <= y <= 100 and d[y] == -1:
-                d[y] = d[x] + 1
-                q.append(y)
-    print(d[e])
+    n,l,r,target=input().split()
+    n,l,r=int(n),int(l),int(r)
+    start=1
+    ans=0
+    for _ in range(n):
+        c,k=input().split(); k=int(k)
+        end=start+k-1
+        if c==target: ans+=max(0,min(r,end)-max(l,start)+1)
+        start=end+1
+    print(ans)
 T = int(input())
 for tc in range(1, T + 1):
     print(f'#{tc} ', end='')

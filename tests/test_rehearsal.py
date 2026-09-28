@@ -122,7 +122,8 @@ class RehearsalTest(unittest.TestCase):
                 accepted=req('submit',{'epoch':player['epoch'],'match_id':mid,'rev':player['draft']['rev'],
                                        'code':reference_code(problem)},token=token)
                 self.assertEqual(accepted['last_submission']['verdict'],'정답')
-                done=req('state')
+                self.assertEqual(req('state')['phase'],'live')
+                done=action('close')
                 self.assertEqual(done['phase'],'finished')
                 self.assertEqual(done['matches'][0]['winner'],2)
                 self.assertEqual(len(done['completed_matches']),11)

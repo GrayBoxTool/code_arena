@@ -2,11 +2,15 @@
 
 ```python
 def solve_case():
-    n, k = map(int, input().split())
-    a = [0] + list(map(int, input().split()))
-    for i in range(n, 1, -1):
-        a[i // 2] += a[i]
-    print(a[1], a[k])
+    n,q=map(int,input().split())
+    d=[0]*(n+2)
+    for _ in range(q):
+        l,r,v=map(int,input().split()); d[l]+=v; d[r+1]-=v
+    a=[]; score=0
+    for i in range(1,n+1):
+        score+=d[i]; a.append(score)
+    best=max(a)
+    print(best,a.count(best))
 T = int(input())
 for tc in range(1, T + 1):
     print(f'#{tc} ', end='')

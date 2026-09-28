@@ -3,28 +3,48 @@
   "files": [
     {
       "public": true,
-      "input": "2\n([])\n([)]\n",
-      "output": "#1 YES\n#2 NO\n"
+      "input": "2\n3 1 3 31\n1 1 12 31\n",
+      "output": "#1 31\n#2 365\n"
     },
     {
       "public": false,
-      "input": "3\n(([]))\n]\n(()\n",
-      "output": "#1 YES\n#2 NO\n#3 NO\n"
+      "input": "3\n2 28 3 1\n12 30 12 31\n1 1 1 31\n",
+      "output": "#1 2\n#2 2\n#3 31\n"
     },
     {
       "public": false,
-      "input": "3\n[][]()\n([[]])()\n()[]\n",
-      "output": "#1 YES\n#2 YES\n#3 YES\n"
+      "input": "3\n2 1 2 28\n3 1 3 31\n4 1 4 30\n",
+      "output": "#1 28\n#2 31\n#3 30\n"
     },
     {
       "public": false,
-      "input": "3\n[(])\n((((()))))\n([][])[()]\n",
-      "output": "#1 NO\n#2 YES\n#3 YES\n"
+      "input": "3\n5 1 5 31\n6 1 6 30\n7 1 7 31\n",
+      "output": "#1 31\n#2 30\n#3 31\n"
     },
     {
       "public": false,
-      "input": "1\n(((()\n",
-      "output": "#1 NO\n"
+      "input": "3\n8 1 8 31\n9 1 9 30\n10 1 10 31\n",
+      "output": "#1 31\n#2 30\n#3 31\n"
+    },
+    {
+      "public": false,
+      "input": "3\n11 1 11 30\n12 1 12 31\n3 1 3 31\n",
+      "output": "#1 30\n#2 31\n#3 31\n"
+    },
+    {
+      "public": false,
+      "input": "3\n5 5 8 15\n7 17 12 24\n3 22 5 10\n",
+      "output": "#1 103\n#2 161\n#3 50\n"
+    },
+    {
+      "public": false,
+      "input": "3\n2 13 6 12\n4 30 11 9\n7 10 9 28\n",
+      "output": "#1 120\n#2 194\n#3 81\n"
+    },
+    {
+      "public": false,
+      "input": "3\n6 30 9 20\n4 19 12 12\n1 1 12 31\n",
+      "output": "#1 83\n#2 238\n#3 365\n"
     }
   ]
 }

@@ -1,7 +1,7 @@
 """Regenerate operator problem book and split question/answer/hint/test documents."""
 from pathlib import Path
 import json
-from problems import PROBLEMS, public_problem, judge_inputs, expected_outputs, reference_code
+from problems import PROBLEMS, public_problem, judge_inputs, expected_outputs, reference_code, public_samples
 
 ROOT=Path(__file__).resolve().parent/'docs'
 
@@ -16,10 +16,10 @@ def question(p):
               '## 제약조건\n\n'+'\n'.join('- '+line for line in pub['constraints'].splitlines()),
               '## 출력\n\n'+pub['output'],
               '```text\n'+pub['output_format']+'\n```',
-              '## 예제 입력\n\n```text\n'+judge_inputs(p)[0].rstrip('\n')+'\n```',
-              '## 예제 출력\n\n```text\n'+expected_outputs(p)[0].rstrip('\n')+'\n```',
+              '## 예제 입력\n\n```text\n'+public_samples(p)["sample_input"].rstrip('\n')+'\n```',
+              '## 예제 출력\n\n```text\n'+public_samples(p)["sample_output"].rstrip('\n')+'\n```',
               '## 예제 해설\n\n'+pub['sample_explanation'],
-              '## 공백과 줄바꿈 안내\n\n코드 블록 안의 띄어쓰기는 실제 공백이며, 각 행은 실제 줄바꿈입니다. 게임 화면의 **공백·줄바꿈 표시 보기**에서는 공백을 `␠`, 줄바꿈을 `↵`로 확인할 수 있습니다. 이 표시 기호를 입력하거나 출력하지 마세요.']
+              '## 공백과 줄바꿈 안내\n\n코드 블록 안의 띄어쓰기는 실제 공백이며, 각 행은 실제 줄바꿈입니다. 긴 예제는 두 테스트케이스에서 일부 줄만 표시합니다. …는 생략 표시이며 실제 데이터가 아닙니다. 전체 보기 기능은 제공하지 않습니다.']
     return '\n\n'.join(sections)+'\n'
 
 def main():

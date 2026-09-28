@@ -116,4 +116,20 @@
 .problem-document .problem-section h3{font-size:1rem;margin:0 0 12px;color:var(--mint)}
 .problem-document .problem-statement{white-space:pre-wrap;line-height:1.9;color:var(--text);word-break:keep-all;overflow-wrap:anywhere}
 .problem-document .sample{white-space:pre;tab-size:4;line-height:1.85;font-size:.93rem;letter-spacing:.02em}
-.whitespace-view{margin:8px 0 22px;color:var(--sub);font-size:.85rem}.whitespace-view summary{cursor:pointer;padding:5px 0}.whitespace-view p{margin:10px 0!important}.whitespace-view .sample{color:var(--gold)}
+
+/* Question and editor remain beside each other while the question scrolls. */
+.player-grid .problem-wrap #problem-content{max-height:calc(100dvh - 210px);min-height:260px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:10px}
+.player-grid>.column:nth-child(2){position:sticky;top:16px}
+.inspect-shell{overflow:hidden;display:flex;flex-direction:column}
+.inspect-shell>.topline{flex:none}
+.inspect-grid{min-height:0;overflow:hidden}
+.inspect-problem{max-height:72dvh;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:14px}
+.inspect-editor{min-width:0}.inspect-editor .inspect-code{max-height:62dvh;overflow:auto;overscroll-behavior:contain}
+.match-winner{outline:2px solid var(--gold);outline-offset:10px;border-radius:10px;background:linear-gradient(135deg,#69532244,#183d3222);animation:winnerGlow 2s ease-in-out infinite}
+.match-winner .arena-team-head{filter:drop-shadow(0 0 12px #e8c36c88)}
+.match-winner .outcome.victory{font-size:1.3rem;letter-spacing:.16em}
+.arena-team.effect-result{animation:winnerReveal .9s both}
+@keyframes winnerReveal{0%{transform:scale(.96);filter:brightness(1)}45%{transform:scale(1.025);filter:brightness(1.6)}100%{transform:scale(1);filter:brightness(1)}}
+@keyframes winnerGlow{0%,100%{box-shadow:0 0 10px #e8bd5133}50%{box-shadow:0 0 30px #e8bd5180}}
+@media(max-width:900px){.inspect-problem{max-height:32dvh}.inspect-editor .inspect-code{max-height:32dvh}.inspect-grid{overflow:auto}}
+@media(max-width:760px){.player-grid .problem-wrap #problem-content{max-height:45dvh;min-height:180px}.player-grid>.column:nth-child(2){position:static}}

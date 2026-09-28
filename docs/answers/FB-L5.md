@@ -2,21 +2,15 @@
 
 ```python
 def solve_case():
-    n, k = map(int, input().split())
-    a = list(map(int, input().split()))
-    total = sum(a)
-    answers = []
-
-    def dfs(i, count, load):
-        if count == k:
-            answers.append(abs(total - 2 * load))
-            return
-        if i >= n or count + n - i < k:
-            return
-        dfs(i + 1, count, load)
-        dfs(i + 1, count + 1, load + a[i])
-    dfs(0, 0, 0)
-    print(min(answers))
+    n,b=map(int,input().split())
+    a=list(map(int,input().split()))
+    def reachable(values):
+        skip,take=1,0
+        for x in values: skip,take=skip|take,skip<<x
+        return skip|take
+    bits=reachable(a[1:]) | (reachable(a[2:-1])<<a[0])
+    v=bits>>b
+    print((v&-v).bit_length()-1 if v else -1)
 T = int(input())
 for tc in range(1, T + 1):
     print(f'#{tc} ', end='')

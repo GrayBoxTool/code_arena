@@ -47,14 +47,14 @@ function teamSetupView(s){
 }
 function board(s){return `<section class="panel full-board"><h2>럼블 종합 순위</h2><div class="tablewrap"><table class="board"><thead><tr><th>순위</th><th>팀</th><th>승점</th><th>승리</th><th>정답</th><th>solve 잔액</th></tr></thead><tbody>${s.standings.map((t,i)=>`<tr class="${t.id===s.me.team_id?'mine':''}"><td>${i+1}</td><td>${esc(t.name)}</td><td>${fmt(t.points)}</td><td>${t.wins}</td><td>${t.solved}</td><td>${fmt(t.credit)}</td></tr>`).join('')}</tbody></table></div><p class="meta">승점 = 문제 승점 + 럼블 매치 승리 보너스 100점. 무승부 보너스 없음.</p></section>`;}
 function outcome(m,tid){return !m.settled?'':m.winner===null?'DRAW':m.winner===tid?'VICTORY':'DEFEAT';}
-function teamHead(t,m){const result=outcome(m,t.id);return `<div class="arena-team-head">${t.logo?`<img src="${imageURL(t.logo)}" alt="${esc(t.name)} 로고">`:'<div class="arena-no-logo">CR</div>'}<div><h2>${esc(t.name)}</h2>${result?`<span class="outcome ${result.toLowerCase()}">${result}</span>`:''}<p class="meta">${fmt(t.points)} 승점 ${t.bonus?`+ 승리 보너스 ${t.bonus}`:''} · solve ${fmt(t.credit)}</p></div></div>`;}
+function teamHead(t,m){const result=outcome(m,t.id);return `<div class="arena-team-head">${t.logo?`<img src="${imageURL(t.logo)}" alt="${esc(t.name)} 로고">`:'<div class="arena-no-logo">CR</div>'}<div><h2>${esc(t.name)}</h2>${result?`<span class="outcome ${result.toLowerCase()}">${result}</span>`:''}${m.settled&&m.round===6?`<p class="meta">${m.reason==='solve_tiebreak'?'승점 동점 · 남은 solve로 승패 결정':m.winner===null?'승점·solve 모두 동점':'결승 승점 합으로 승패 결정'}</p>`:''}<p class="meta">${fmt(t.points)} 승점 ${t.bonus?`+ 승리 보너스 ${t.bonus}`:''} · solve ${fmt(t.credit)}</p></div></div>`;}
 function memberCard(x,m,admin){return `<div class="member-card" data-user="${x.id}"><div class="member-title"><span class="online-dot ${x.online?'online':''}"></span><strong>${esc(x.name)}</strong>${x.captain?'<small>팀장</small>':''}<span class="member-level">${x.level?'Lv'+x.level:'무작위'}</span></div><div class="member-data"><span class="${x.solved?'good':''}">${x.solved?'정답 · +'+x.win_points+' P':m.status==='pending'?(x.ready?'준비 완료':'준비 중'):x.verdict?esc(x.verdict.split('\n')[0]):'풀이 중'}</span>${admin&&m.status!=='pending'?`<button class="secondary mini" data-inspect="${x.id}">코드 확인</button>`:''}</div><div class="item-history">${x.purchases.map(h=>`<span>${labels[h.kind]} −${h.cost}</span>`).join('')}${x.item_used?'<span>결승 스킬 사용</span>':''}${x.freeze_until>now()?'<span class="frozen-label">빙결</span>':''}</div></div>`;}
 function matchCard(m,admin=false){
   const a=m.teams[0],b=m.teams[1],ratio=100*(a.points+50)/(a.points+b.points+100);
   const prev=gaugeWidths.get(m.id)??50;gaugeWidths.set(m.id,ratio);
   return `<section class="panel arena match-arena" data-match="${m.id}"><div class="arena-top"><span class="eyebrow">${roundLabel(m.round)} · MATCH ${m.id}</span><strong class="clock" data-end="${m.end_at||0}">${m.status==='open'?timeLabel(m.end_at):m.status==='pending'?'시작 대기':'종료'}</strong></div>
   <div class="tug-label"><span>${esc(a.name)} ${a.points}</span><span>${b.points} ${esc(b.name)}</span></div><div class="tug"><div class="tug-blue" style="width:${prev}%" data-ratio="${ratio}"></div><span class="tug-center"></span></div>
-  <div class="arena-grid"><section class="arena-team own" data-team="${a.id}">${teamHead(a,m)}${a.members.map(x=>memberCard(x,m,admin)).join('')}</section><div class="arena-center"><div>VS</div><p>${m.round===6?'Lv5 첫 정답 승리':'승리 보너스 +100'}</p></div><section class="arena-team opponent" data-team="${b.id}">${teamHead(b,m)}${b.members.map(x=>memberCard(x,m,admin)).join('')}</section></div></section>`;
+  <div class="arena-grid"><section class="arena-team own ${m.settled&&m.winner===a.id?'match-winner':''}" data-team="${a.id}">${teamHead(a,m)}${a.members.map(x=>memberCard(x,m,admin)).join('')}</section><div class="arena-center"><div>VS</div><p>${m.round===6?'결승 10분 · 동일 승점 · 동점 시 solve 잔액':'승리 보너스 +100'}</p></div><section class="arena-team opponent ${m.settled&&m.winner===b.id?'match-winner':''}" data-team="${b.id}">${teamHead(b,m)}${b.members.map(x=>memberCard(x,m,admin)).join('')}</section></div></section>`;
 }
 function wireMatches(){app.querySelectorAll('[data-inspect]').forEach(b=>b.onclick=()=>{inspectId=Number(b.dataset.inspect);inspectMode='draft';showInspect();});requestAnimationFrame(()=>app.querySelectorAll('[data-ratio]').forEach(el=>el.style.width=el.dataset.ratio+'%'));}
 function compare(s){
@@ -121,17 +121,22 @@ function resultView(s){
 function solvedView(s){
   const l=s.me.level,final=s.match.round===6;
   app.innerHTML=`<section class="panel result-screen"><div class="result-symbol">✓</div><h1>정답 제출 완료</h1><p>승점 +${s.solved.win_points} · solve +${s.solved.solve_points}</p><strong class="clock" data-end="${s.match.end_at}">${timeLabel(s.match.end_at)}</strong>
-  ${final&&l<=3?`<div class="final-skill"><h2>${['','빙결','변수 교란','코드 절단'][l]}</h2><p>${['','상대 팀 전체의 문제와 코드 작성을 20초 동안 막습니다.','상대 Lv4·5의 가장 자주 쓰인 변수 이름을 바꿉니다.','상대 Lv4·5의 마지막 내용이 있는 코드 줄을 지웁니다.'][l]}</p><button class="primary" id="use-item" ${s.item_available?'':'disabled'}>${s.item_available?'아이템 사용 · 1회':'아이템 사용 완료'}</button></div>`:'<p>매치 종료까지 기다려 주세요.</p>'}
-  ${s.relay?`<h3>팀 전용 레벨 4 출력</h3><pre class="sample">${esc(s.relay.output)}</pre><p>레벨 5 담당자에게 자동 전달되었습니다.</p>`:''}</section>${board(s)}`;
+  ${final&&l<=3?`<div class="final-skill"><h2>${['','빙결','변수 교란','코드 절단'][l]}</h2><p>${['','상대 팀 전체의 문제와 코드 작성을 20초 동안 막습니다.','상대 Lv4·5의 가장 자주 쓰인 변수 이름을 바꿉니다.','상대 Lv4·5의 마지막 내용 있는 두 줄을 지웁니다. 빈 줄은 건너뜁니다.'][l]}</p><button class="primary" id="use-item" ${s.item_available?'':'disabled'}>${s.item_available?'아이템 사용 · 1회':'아이템 사용 완료'}</button></div>`:'<p>매치 종료까지 기다려 주세요.</p>'}
+  </section>${board(s)}`;
   const b=app.querySelector('#use-item');if(b)b.onclick=()=>action('item');
 }
-function sampleHTML(title,text){return `<h3>${esc(title)}</h3><pre class="sample sample-raw">${esc(text)}</pre><details class="whitespace-view"><summary>공백·줄바꿈 표시 보기</summary><p class="meta">␠는 공백 한 칸, ↵는 줄바꿈입니다. 이 기호는 실제 입력·출력에 포함하지 않습니다.</p><pre class="sample">${esc(String(text).replace(/ /g,'␠').replace(/\n/g,'↵\n'))}</pre></details>`;}
+function sampleHTML(title,text){
+  const raw=String(text||'').trimEnd();
+  const lines=raw.split('\n');
+  const preview=(lines.length>10 ? lines.slice(0,9).concat('… (생략) …') : lines).join('\n');
+  return `<h3>${esc(title)}</h3><pre class="sample sample-raw">${esc(preview)}</pre>${preview.includes('…')?'<p class="meta">두 테스트케이스의 일부만 표시합니다. … 부분은 생략되어 있으므로 그대로 실행 입력에 사용하지 마세요.</p>':''}`;
+}
 function problemHTML(p){return `<article class="problem-document"><span class="kicker">${esc(p.id)} · LEVEL ${p.level}</span><h2>${esc(p.title)}</h2><section class="problem-section"><h3>문제 설명</h3><p class="problem-statement">${esc(p.statement)}</p></section><section class="problem-section"><h3>입력</h3><p class="problem-statement">${esc(p.input)}</p><h3>테스트케이스 하나의 입력 형식</h3><pre class="sample sample-raw">${esc(p.input_format)}</pre><p class="meta">위 형식의 값 사이 공백은 구분자입니다. ...는 반복을 나타내는 설명이며 실제 입력에는 없습니다.</p></section><section class="problem-section"><h3>제약조건</h3><p class="problem-statement">${esc(p.constraints)}</p></section><section class="problem-section"><h3>출력</h3><p class="problem-statement">${esc(p.output)}</p><pre class="sample sample-raw">${esc(p.output_format)}</pre><p class="meta">tc, answer, value 등의 이름은 자리 표시자입니다. 실제 출력에는 테스트케이스 번호와 계산한 값을 넣습니다.</p></section><section class="problem-section">${sampleHTML('예제 입력',p.sample_input)}${sampleHTML('예제 출력',p.sample_output)}</section><section class="problem-section"><h3>예제 해설</h3><p class="problem-statement">${esc(p.sample_explanation)}</p></section></article>`;}
 
 function playView(s){
   const p=s.problem;submitError='';pendingSubmission=null;
   app.innerHTML=`<div class="topline"><div><div class="eyebrow">${roundLabel(s.round)} · ${esc(s.me.name)} · LV ${s.me.level}</div><h1>${esc(p.title)}</h1></div><div><span class="meta">남은 시간 </span><strong class="clock" data-end="${s.match.end_at}">${timeLabel(s.match.end_at)}</strong></div></div><div id="freeze-banner" class="freeze-banner" hidden></div>
-  <div class="player-grid"><section class="panel column problem-wrap"><div id="problem-content">${problemHTML(p)}<div id="relay-box"></div></div><div id="problem-mask" class="problem-mask" hidden>빙결 중 · 문제를 볼 수 없습니다.</div></section>
+  <div class="player-grid"><section class="panel column problem-wrap"><div id="problem-content">${problemHTML(p)}</div><div id="problem-mask" class="problem-mask" hidden>빙결 중 · 문제를 볼 수 없습니다.</div></section>
   <section class="panel column"><div class="code-label"><h2>Python 풀이</h2><span id="sync-status">운영자와 코드 공유 중</span></div><p class="editor-help">Tab 자동완성 · Enter 들여쓰기 · 괄호 자동 완성</p><div class="editor-surface"><div class="editor-gutter" aria-hidden="true"></div><div class="editor-pane"><pre class="editor-highlight" aria-hidden="true"></pre><textarea class="editor" id="editor" spellcheck="false" autocomplete="off" aria-label="Python 코드"></textarea><div class="completion-menu" role="listbox" hidden></div></div></div><div class="actionrow"><span id="submit-timer" class="meta"></span><button class="primary" id="submit">코드 제출</button></div><div class="verdict" id="verdict"></div></section>
   <section class="panel column hint-panel"><h2>팀 solve <span id="balance"></span></h2><div class="hint-list">${Object.keys(s.costs).map(kind=>`<button class="secondary hint-btn" data-kind="${kind}" ${kind==='assist'&&!s.assist_enabled?'disabled':''}>${labels[kind]} <strong>${s.costs[kind]} P</strong></button>`).join('')}</div><p class="meta">팀원이 정답을 내면 즉시 공동 잔액에 적립됩니다.</p><div id="hint-details" class="hint-details"></div></section></div>`;
   const editor=app.querySelector('#editor'),key=`draft:${s.epoch}:${s.match.id}:${s.me.id}`;
@@ -179,7 +184,7 @@ function updatePlay(){
   const team=s.standings.find(t=>t.id===s.me.team_id);app.querySelector('#balance').textContent=fmt(team?.credit);
   app.querySelector('#hint-details').innerHTML=s.hints.map(h=>`<h3>${labels[h.kind]}</h3><p>${esc(h.detail)}</p>`).join('');
   const verdict=app.querySelector('#verdict');if(submitError)verdict.textContent=submitError;else if(!busy&&s.last_submission)verdict.textContent=`${s.last_submission.verdict}\n${s.last_submission.passed}/${s.last_submission.total}개 채점 파일 통과`;
-  const relay=app.querySelector('#relay-box');if(s.match.round===6&&s.me.level===5&&!s.relay)relay.innerHTML='<section class="problem-section"><h3>팀 전용 입력</h3><p>지금도 코드를 제출할 수 있습니다. 같은 팀이 Lv4를 해결하면 그 출력으로 만든 추가 검증 입력이 여기에 공개됩니다.</p></section>';if(s.relay&&s.me.level===5)relay.innerHTML=`<h3>Lv4 출력으로 구성된 최종 검증 입력</h3><pre class="sample">1\n${esc(s.relay.level5_input)}</pre><p>Lv4의 실제 출력값을 사용한 입력입니다. 이 데이터는 결승 시작부터 채점에 포함되어 있으며, 공개 전에도 Lv5 제출이 가능합니다.</p>`;
+
 }
 function phase(s){
   if(s.me.role==='admin')return 'admin';if(!s.me.profile_complete)return 'profile';if(s.me.is_captain&&!s.team_setup.complete)return 'team-setup';
@@ -222,17 +227,25 @@ function ingest(s,force=false){
   lastTeamSetup=setupSignature;if(document.activeElement?.tagName!=='SELECT'||force)lastLobby=JSON.stringify({me:s.me,matches:s.matches,standings:s.standings,selection:s.selection,phase:s.phase,target:s.target_round});effects(s);
 }
 async function refresh(){if(!auth||(busy&&view!=='play'))return;try{ingest(await api('state'));if(inspectId)await showInspect();}catch(error){toast(error.message);}}
+let inspectRequest=0;
 async function showInspect(){
-  const uid=inspectId;if(!uid)return;
-  try{const data=await api('inspect?user_id='+uid);if(inspectId!==uid)return;
+  const uid=inspectId,request=++inspectRequest;if(!uid)return;
+  try{const data=await api('inspect?user_id='+uid);if(inspectId!==uid||request!==inspectRequest)return;
     let pane=document.querySelector('#inspector');if(!pane){pane=document.createElement('div');pane.id='inspector';pane.className='inspector';document.body.appendChild(pane);}
-    if(pane.querySelector('#inspect-mode')===document.activeElement)return;
-    const scroll=pane.querySelector('pre.inspect-code')?.scrollTop||0;
+    const key=String(uid)+':'+data.problem.id;
+    if(pane.dataset.subject!==key){
+      pane.innerHTML=`<div class="inspect-shell panel"><div class="topline"><h2>${esc(data.name)} · 코드 확인</h2><button id="close-inspect" class="secondary">닫기</button></div><div class="inspect-grid"><section class="inspect-problem">${problemHTML(data.problem)}</section><section class="inspect-editor"><select id="inspect-mode"><option value="draft">작성 중인 코드</option><option value="last">마지막 제출 코드</option><option value="accepted">정답 제출 코드</option></select><pre class="inspect-code sample"></pre><p class="meta">실시간 갱신 · 문제와 코드의 스크롤 위치를 유지합니다.</p></section></div></div>`;
+      pane.dataset.subject=key;
+      pane.querySelector('#close-inspect').onclick=()=>{inspectId=null;inspectRequest++;pane.remove();};
+      pane.querySelector('#inspect-mode').onchange=e=>{inspectMode=e.target.value;showInspect();};
+    }
     const code=inspectMode==='accepted'?(data.accepted_code??'정답 제출 기록 없음'):inspectMode==='last'?(data.last?.code??'제출 기록 없음'):data.draft.code;
-    pane.innerHTML=`<div class="inspect-shell panel"><div class="topline"><h2>${esc(data.name)} · 코드 확인</h2><button id="close-inspect" class="secondary">닫기</button></div><div class="inspect-grid"><section>${problemHTML(data.problem)}</section><section><select id="inspect-mode"><option value="draft" ${inspectMode==='draft'?'selected':''}>작성 중인 코드</option><option value="last" ${inspectMode==='last'?'selected':''}>마지막 제출 코드</option><option value="accepted" ${inspectMode==='accepted'?'selected':''}>정답 제출 코드</option></select><pre class="inspect-code sample">${esc(code)}</pre></section></div></div>`;
-    pane.querySelector('.inspect-code').scrollTop=scroll;pane.querySelector('#close-inspect').onclick=()=>{inspectId=null;pane.remove();};pane.querySelector('#inspect-mode').onchange=e=>{inspectMode=e.target.value;e.target.blur();showInspect();};
-  }catch(error){toast(error.message);inspectId=null;document.querySelector('#inspector')?.remove();}
+    const el=pane.querySelector('.inspect-code');
+    if(el.textContent!==code){const top=el.scrollTop,left=el.scrollLeft;el.textContent=code;el.scrollTop=top;el.scrollLeft=left;}
+    pane.querySelector('#inspect-mode').value=inspectMode;
+  }catch(error){if(request!==inspectRequest||inspectId!==uid)return;toast(error.message);}
 }
+
 setInterval(()=>{
   if(!state)return;
   document.querySelectorAll('[data-end]').forEach(el=>{if(Number(el.dataset.end)>0)el.textContent=timeLabel(Number(el.dataset.end));});

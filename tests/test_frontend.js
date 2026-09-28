@@ -86,8 +86,8 @@ assert.equal(vm.runInContext('editState.dirty',context),true);
 // Literal input remains copyable; whitespace symbols are a separate view.
 const sampleHtml=vm.runInContext(`sampleHTML('예제', '2 3\\n<tag>\\n')`,context);
 assert.ok(sampleHtml.includes('2 3\n&lt;tag&gt;'));
-assert.ok(sampleHtml.includes('2␠3↵'));
-assert.ok(sampleHtml.includes('<details'));
+assert.ok(!sampleHtml.includes('전체 예제 보기')); 
+assert.ok(!sampleHtml.includes('<details')); 
 // A final Lv5 player can submit before the Lv4 relay has been revealed.
 const nodes=new Map();
 element.querySelector=selector=>{
@@ -96,5 +96,24 @@ element.querySelector=selector=>{
 };
 vm.runInContext(`view='play';busy=false;submitError='';state={draft:{freeze_until:0,cooldown_until:0},match:{round:6},me:{level:5,team_id:1},relay:null,judge_enabled:true,standings:[],hints:[]};updatePlay();`,context);
 assert.equal(nodes.get('#submit').disabled,false);
-assert.ok(nodes.get('#relay-box').innerHTML.includes('지금도 코드를 제출할 수 있습니다'));
+assert.ok(!sampleHtml.includes('표시 생략'));
+const longHtml=vm.runInContext(`sampleHTML('긴 예제', Array.from({length:30},(_,i)=>String(i)).join('\\n'))`,context);
+assert.ok(!longHtml.includes('전체 예제 보기')); 
+assert.ok(longHtml.includes('… (생략) …')); 
 console.log('Problem whitespace and early final submission controls: OK');
+
+// Polling inspector updates only code, leaving the problem DOM and both scroll axes intact.
+(async()=>{
+  const codeNode={textContent:'old',scrollTop:150,scrollLeft:35};
+  const selector={value:'draft'};
+  const pane={dataset:{subject:'7:FA-L4'},scrollTop:250,
+    querySelector:sel=>sel==='.inspect-code'?codeNode:selector};
+  Object.defineProperty(pane,'innerHTML',{set(){throw new Error('Inspector remounted during live refresh');}});
+  const originalQuery=context.document.querySelector;
+  context.document.querySelector=sel=>sel==='#inspector'?pane:originalQuery(sel);
+  vm.runInContext(`inspectId=7;inspectMode='draft';api=async()=>({problem:{id:'FA-L4'},draft:{code:'latest code'}});`,context);
+  await vm.runInContext('showInspect()',context);
+  assert.equal(codeNode.textContent,'latest code');
+  assert.equal(codeNode.scrollTop,150);assert.equal(codeNode.scrollLeft,35);assert.equal(pane.scrollTop,250);
+  console.log('Inspector live refresh preserves mounted problem and scroll: OK');
+})().catch(error=>{console.error(error);process.exitCode=1;});

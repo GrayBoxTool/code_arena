@@ -18,7 +18,7 @@ BASE=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(BASE))
 from problems import PROBLEMS,REWARD,HINT_COST,reference_code,expected_outputs,judge_inputs
 from services import judge
-from server import rename_variable,erase_last_line
+from server import rename_variable,erase_last_lines
 
 class ProblemsTest(unittest.TestCase):
     def test_all_reference_solutions(self):
@@ -32,28 +32,50 @@ class ProblemsTest(unittest.TestCase):
                 self.assertNotEqual(judge('T=int(input())\nfor tc in range(1,T+1): print(f"#{tc} -999999")',p)[0],'정답')
 
     def test_final_independent_oracles(self):
-        for p in PROBLEMS:
-            if p['set'] not in (6,7) or p['level'] not in (4,5): continue
-            for case in p['cases']:
-                lines=case.splitlines()
-                if p['level']==4:
-                    n,m=map(int,lines[0].split()); d=[[10**9]*n for _ in range(n)]
-                    for i in range(n): d[i][i]=0
-                    for line in lines[1:]:
-                        a,b,w=map(int,line.split());d[a-1][b-1]=min(d[a-1][b-1],w)
-                        if p['set']==7: d[b-1][a-1]=min(d[b-1][a-1],w)
-                    for k in range(n):
-                        for i in range(n):
-                            for j in range(n):
-                                candidate=d[i][k]+d[k][j] if p['set']==6 else max(d[i][k],d[k][j])
-                                d[i][j]=min(d[i][j],candidate)
-                    expected=d[0][1:]
+        import random
+        rng=random.Random(71)
+        for ident in ('FA-L4','FB-L4','FA-L5','FB-L5'):
+            p=next(p for p in PROBLEMS if p['id']==ident)
+            for _ in range(30):
+                n=rng.randint(4,9)
+                if ident=='FA-L4':
+                    cap,k=rng.randint(1,20),rng.randint(0,n)
+                    items=[(rng.randint(1,10),rng.randint(1,15)) for _ in range(n)]
+                    vals=[sum(items[i][1] for i in comb) for comb in itertools.combinations(range(n),k) if sum(items[i][0] for i in comb)<=cap]
+                    expected=max(vals,default=-1)
+                    case=f'{n} {cap} {k}\n'+''.join(f'{a} {b}\n' for a,b in items)
+                elif ident=='FB-L4':
+                    k,b=rng.randint(1,n),rng.randint(1,50);values=[rng.randint(1,20) for _ in range(n)]
+                    vals=[sum(c)-b for c in itertools.combinations(values,k) if sum(c)>=b]
+                    expected=min(vals,default=-1)
+                    case=f'{n} {k} {b}\n'+' '.join(map(str,values))+'\n'
+                elif ident=='FA-L5':
+                    m=3;grid=[''.join(rng.choice('WBRG') for _ in range(m)) for _ in range(n)]
+                    costs=[[rng.randint(1,9) for _ in range(m)] for _ in range(n)]
+                    expected=min(sum(costs[r][c] for color,(lo,hi) in zip('WBRG',zip((0,)+cuts,cuts+(n,))) for r in range(lo,hi) for c in range(m) if grid[r][c]!=color) for cuts in itertools.combinations(range(1,n),3))
+                    case=f'{n} {m}\n'+'\n'.join(grid)+'\n'+''.join(' '.join(map(str,row))+'\n' for row in costs)
                 else:
-                    n,k=map(int,lines[0].split()); a=list(map(int,lines[1].split()))
-                    sums=[sum(a[i] for i in subset) for subset in itertools.combinations(range(n),k) if p['set']==7 or all(y-x>1 for x,y in zip(subset,subset[1:]))]
-                    expected=[min(sums) if p['set']==6 else min(abs(sum(a)-2*s) for s in sums)]
-                actual=expected_outputs(p|{'cases':[case]})[0].strip().split()[1:]
-                self.assertEqual(list(map(int,actual)),expected)
+                    b=rng.randint(1,50);values=[rng.randint(1,20) for _ in range(n)]
+                    sums=[sum(values[i] for i in range(n) if mask>>i&1)-b for mask in range(1,1<<n) if all(not(mask>>i&1 and mask>>((i+1)%n)&1) for i in range(n))]
+                    expected=min((v for v in sums if v>=0),default=-1)
+                    case=f'{n} {b}\n'+' '.join(map(str,values))+'\n'
+                actual=int(expected_outputs(p|{'cases':[case]})[0].split()[1])
+                self.assertEqual(actual,expected,(ident,case))
+
+    def test_source_examples_and_previews(self):
+        from problems import _reference_outputs,public_samples
+        sources=json.loads((BASE/'source_cases.json').read_text())
+        self.assertEqual(len(sources),21)
+        for p in PROBLEMS:
+            if p.get('source_name') in sources:
+                source=sources[p['source_name']]
+                self.assertEqual(_reference_outputs(reference_code(p),(source['input'],))[0].split(),source['output'].split())
+            sample=public_samples(p)
+            self.assertEqual(set(sample),{'sample_input','sample_output'})
+            self.assertLessEqual(len(sample['sample_input'].splitlines()),10)
+            self.assertLessEqual(len(sample['sample_output'].splitlines()),10)
+            self.assertTrue(sample['sample_input'].startswith('2\n'))
+            self.assertIn('#1',sample['sample_output']);self.assertIn('#2',sample['sample_output'])
 
     def test_effects_preserve_non_variables(self):
         code='count=1\ncount+=count\n# count comment\ntext="count"\nobj.count=5\n'
@@ -66,7 +88,9 @@ class ProblemsTest(unittest.TestCase):
         namespace={}
         exec(compile(formatted,'<test>','exec'),namespace)
         self.assertNotIn('{count',formatted)
-        self.assertEqual(erase_last_line('a=1\nprint(a)\n\n   \n'),'a=1\n\n   \n')
+        self.assertEqual(erase_last_lines('a=1\nprint(a)\n\n   \n'),'\n   \n')
+        self.assertEqual(erase_last_lines('a=1\n\n'),'\n')
+        self.assertEqual(erase_last_lines('\n  \n'),'\n  \n')
 
 class FlowTest(unittest.TestCase):
     def test_complete_tournament(self):
@@ -148,7 +172,10 @@ class FlowTest(unittest.TestCase):
                     self.assertEqual(action('admin/next')['phase'],'matching')
                     self.assertEqual(prepare()['round'],round_no)
                     action('admin/close')
+                before_final=req('state')['standings']
                 action('admin/next'); final=prepare()
+                self.assertTrue(all(t['points']==0 for t in final['matches'][0]['teams']))
+                self.assertEqual({t['id']:t['credit'] for t in before_final},{t['id']:t['credit'] for t in final['standings']})
                 self.assertEqual(final['duration'],600)
                 self.assertEqual(final['round'],6)
                 self.assertEqual(len(final['matches']),1)
@@ -170,12 +197,13 @@ class FlowTest(unittest.TestCase):
                 self.assertTrue(write(b[3],'count=99',stale)['conflict'])
                 before=req('state',b[3])['draft']['code']
                 submit(a[2]);action('item',a[2])
-                self.assertEqual(req('state',b[3])['draft']['code'],erase_last_line(before))
-                relay=submit(a[3]);self.assertTrue(relay['relay']['output'])
-                self.assertEqual(req('state',a[4])['relay'],relay['relay'])
-                self.assertIsNone(req('state',b[4])['relay'])
-                winner=submit(a[4]);self.assertEqual(winner['phase'],'finished');self.assertEqual(winner['match']['winner'],1)
-                self.assertEqual(winner['match']['bonus'],0)
+                self.assertEqual(req('state',b[3])['draft']['code'],erase_last_lines(before))
+                submit(a[3])
+                early_win=submit(a[4]);self.assertEqual(early_win['phase'],'live')
+                second=submit(b[4]);self.assertEqual(second['solved']['win_points'],300)
+                winner=action('admin/close')
+                self.assertEqual(winner['phase'],'finished');self.assertEqual(winner['matches'][0]['winner'],1)
+                self.assertEqual(winner['matches'][0]['bonus'],0)
                 self.assertIn('error',action('admin/next'))
                 old_epoch=winner['epoch'];reset=action('admin/reset',confirmation='전체 초기화')
                 self.assertNotEqual(reset['epoch'],old_epoch);self.assertEqual(reset['round'],0)

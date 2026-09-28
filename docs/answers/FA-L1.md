@@ -2,14 +2,9 @@
 
 ```python
 def solve_case():
-    n, k = map(int, input().split())
-    a = list(map(int, input().split()))
-    s = sum(a[:k])
-    ans = s
-    for i in range(k, n):
-        s += a[i] - a[i - k]
-        ans = min(ans, s)
-    print(ans)
+    n,p,q,r,s=map(int,input().split())
+    a=list(map(int,input().split()))
+    print(min(sum(a)*p,sum(q+max(0,w-r)*s for w in a)))
 T = int(input())
 for tc in range(1, T + 1):
     print(f'#{tc} ', end='')
