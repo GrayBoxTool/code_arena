@@ -14,6 +14,7 @@ const intervals = [];
 const context = vm.createContext({
   window: {}, sessionStorage, setInterval: (callback, delay) => intervals.push({callback, delay}), clearTimeout: () => {},
   document: {querySelector: () => element},
+  fetch: () => Promise.resolve({json: () => Promise.resolve({version:'test-v1',notice:{}})}),
 });
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/editor.js'), 'utf8'), context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8'), context);

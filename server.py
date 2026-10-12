@@ -29,6 +29,10 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from problems import public_samples, PROBLEMS, REWARD, HINT_COST, public_problem, judge_inputs, expected_outputs
 from services import judge, assist
+import account_security as accounts
+import lobby_service as lobbies
+from mail_service import send_code
+from privacy_notice import CONSENT_VERSION, PRIVACY_NOTICE
 
 ROOT=Path(__file__).resolve().parent
 DATA=Path(os.environ.get('RUMBLE_DATA_DIR',str(ROOT/'data')))
@@ -116,6 +120,8 @@ def setup():
         CREATE TABLE IF NOT EXISTS logo_candidates(team_id INTEGER NOT NULL,slot INTEGER NOT NULL,source TEXT NOT NULL,
           data_uri TEXT NOT NULL,PRIMARY KEY(team_id,slot));
         ''')
+        accounts.create_schema(c)
+        lobbies.create_schema(c)
         def columns(table,defs):
             present={x[1] for x in c.execute(f'PRAGMA table_info({table})')}
             for name,definition in defs.items():
@@ -132,6 +138,14 @@ def setup():
                     c.execute('INSERT INTO users(name,team_id,level,token,role) VALUES (?,?,?,?,?)',
                               (f'{name} {level}번',tid,level,access_token('player',tid,level),'player'))
             create_schedule(c); setval(c,'round',0)
+        op_id=os.environ.get('BOOTSTRAP_OPERATOR_ID','').strip()
+        op_password=os.environ.get('BOOTSTRAP_OPERATOR_PASSWORD','')
+        op_email=os.environ.get('BOOTSTRAP_OPERATOR_EMAIL','').strip().lower()
+        if op_id and op_password and op_email and not c.execute('SELECT 1 FROM accounts WHERE username=?',(op_id,)).fetchone():
+            op_id=accounts.validate_username(op_id); op_email=accounts.validate_email(op_email)
+            op_name=accounts.validate_nickname(os.environ.get('BOOTSTRAP_OPERATOR_NAME','운영자'))
+            c.execute('INSERT INTO accounts(username,nickname,full_name,email,password_hash,email_verified,is_operator,consent_version,consent_at,created_at) VALUES (?,?,?,?,?,1,1,?,?,?)',
+                      (op_id,op_name,op_name,op_email,accounts.hash_password(op_password),CONSENT_VERSION,time.time(),time.time()))
         if not setting(c,'phase'):
             r=current_round(c)
             opened=c.execute("SELECT 1 FROM matches WHERE round=? AND status='open'",(r,)).fetchone()
@@ -455,6 +469,296 @@ def logo_worker(tid,name,generation,ep):
                 LOGO_JOBS[tid]['status']='failed'
                 LOGO_JOBS[tid]['error']='API 생성 실패: '+str(exc)[:250]+' 임시 후보를 선택할 수 있습니다.'
 
+TIER_TABLE=[(800,"브론즈","🪨"),(1000,"실버","🥈"),(1200,"골드","🥇"),(1400,"플래티넘","💠"),(1600,"다이아몬드","💎"),(1800,"챌린저","👑")]
+SKILL_AXES=["implementation","strings","simulation","data_structures","search","optimization"]
+
+def tier_for(rating):
+    chosen=TIER_TABLE[0]
+    for row in TIER_TABLE:
+        if rating>=row[0]: chosen=row
+    return {"name":chosen[1],"icon":chosen[2],"min_rating":chosen[0]}
+
+def account_summary(c,row):
+    if not row:return None
+    stats={x:0 for x in SKILL_AXES}
+    if c:
+        stats.update({x["axis"]:x["value"] for x in c.execute('SELECT axis,value FROM account_stats WHERE account_id=?',(row['id'],))})
+    rating=row['rating']
+    return {"id":row['id'],"username":row['username'],"nickname":row['nickname'],"full_name":row['full_name'],
+            "email":row['email'],"avatar_id":row['avatar_id'],"rating":rating,"tier":tier_for(rating),
+            "games":row['games'],"wins":row['wins'],"is_operator":bool(row['is_operator']),"skills":stats}
+
+def account_home(c,me):
+    active=c.execute("SELECT l.id FROM lobbies l JOIN lobby_members m ON m.lobby_id=l.id WHERE m.account_id=? AND l.status NOT IN ('closed','cancelled') LIMIT 1",(me['id'],)).fetchone()
+    queue=c.execute('SELECT q.joined_at,q.batch_lobby_id,(SELECT COUNT(*) FROM matchmaking_queue WHERE batch_lobby_id IS NULL) AS waiting,(SELECT phase_ends_at FROM lobbies WHERE id=q.batch_lobby_id) AS phase_ends_at FROM matchmaking_queue q WHERE q.account_id=?',(me['id'],)).fetchone()
+    friends=[dict(x) for x in c.execute("SELECT a.id,a.nickname,a.rating,a.avatar_id FROM friendships f JOIN accounts a ON a.id=CASE WHEN f.requester_id=? THEN f.target_id ELSE f.requester_id END WHERE (f.requester_id=? OR f.target_id=?) AND f.status='accepted'",(me['id'],me['id'],me['id']))]
+    incoming=[dict(x) for x in c.execute("SELECT a.id AS requester_id,a.nickname,a.rating FROM friendships f JOIN accounts a ON a.id=f.requester_id WHERE f.target_id=? AND f.status='pending'",(me['id'],))]
+    return {"me":account_summary(c,me),"lobbies":lobbies.public_lobbies(c),"friends":friends,"friend_requests":incoming,
+            "active_lobby":active[0] if active else None,
+            "queue":{"joined":bool(queue),"joined_at":queue['joined_at'] if queue else None,"batch_lobby_id":queue['batch_lobby_id'] if queue else None,"phase_ends_at":queue['phase_ends_at'] if queue else None,"waiting":queue['waiting'] if queue else 0}}
+
+def friend_request(c,account_id,nickname):
+    if not isinstance(nickname,str):raise ValueError('친구 닉네임을 입력하세요.')
+    target=c.execute('SELECT id FROM accounts WHERE nickname=? COLLATE NOCASE',(nickname.strip(),)).fetchone()
+    if not target:raise ValueError('해당 닉네임의 계정을 찾을 수 없습니다.')
+    if target['id']==account_id:raise ValueError('자기 자신에게 친구 요청을 보낼 수 없습니다.')
+    x,y=sorted((account_id,target['id']))
+    if c.execute('SELECT 1 FROM friendships WHERE (requester_id=? AND target_id=?) OR (requester_id=? AND target_id=?)',(x,y,y,x)).fetchone():raise ValueError('이미 친구 요청이 있거나 친구입니다.')
+    c.execute('INSERT INTO friendships(requester_id,target_id,status,created_at) VALUES (?,?,"pending",?)',(account_id,target['id'],time.time()))
+
+def friend_respond(c,account_id,requester_id,accept):
+    row=c.execute("SELECT status FROM friendships WHERE requester_id=? AND target_id=? AND status='pending'",(requester_id,account_id)).fetchone()
+    if not row:raise ValueError('친구 요청을 찾을 수 없습니다.')
+    if accept:c.execute("UPDATE friendships SET status='accepted' WHERE requester_id=? AND target_id=?",(requester_id,account_id))
+    else:c.execute('DELETE FROM friendships WHERE requester_id=? AND target_id=?',(requester_id,account_id))
+
+def queue_join(c,account_id):
+    active=c.execute("SELECT 1 FROM lobby_members m JOIN lobbies l ON l.id=m.lobby_id WHERE m.account_id=? AND l.status NOT IN ('closed','cancelled')",(account_id,)).fetchone()
+    if active:raise ValueError('진행 중이거나 대기 중인 로비를 먼저 나가세요.')
+    c.execute('INSERT OR IGNORE INTO matchmaking_queue(account_id,joined_at) VALUES (?,?)',(account_id,time.time()))
+    waiting=list(c.execute('SELECT q.account_id,a.rating FROM matchmaking_queue q JOIN accounts a ON a.id=q.account_id WHERE q.batch_lobby_id IS NULL ORDER BY q.joined_at LIMIT 10'))
+    if len(waiting)==10:
+        a,b=lobbies.balanced_split(waiting)
+        lobby_id=c.execute("INSERT INTO lobbies(name,mode,owner_id,visibility,status,phase,phase_ends_at,created_at) VALUES ('랭크 매칭','normal',?,'private','running','countdown',?,?)",(waiting[0]['account_id'],time.time()+10,time.time())).lastrowid
+        for team,players in ((1,a),(2,b)):
+            for player in players:c.execute('INSERT INTO lobby_members(lobby_id,account_id,team_no,joined_at) VALUES (?,?,?,?)',(lobby_id,player['account_id'],team,time.time()))
+        ids=[x['account_id'] for x in waiting]
+        c.executemany('UPDATE matchmaking_queue SET batch_lobby_id=? WHERE account_id=?',[(lobby_id,x) for x in ids])
+
+def progress_lobby(c,lobby_id):
+    before=c.execute('SELECT * FROM lobbies WHERE id=?',(lobby_id,)).fetchone()
+    if before and before['phase']=='live' and before['phase_ends_at'] and before['phase_ends_at']<=time.time():
+        settle_account_game(c,lobby_id)
+    if before and before['phase']=='team_setup' and before['phase_ends_at'] and before['phase_ends_at']<=time.time():
+        for identity in c.execute('SELECT * FROM lobby_team_identity WHERE lobby_id=?',(lobby_id,)).fetchall():
+            name=identity['name'] or f"팀 {identity['team_no']}"
+            candidates=identity['candidates_json'] or json.dumps(placeholders(name))
+            c.execute('UPDATE lobby_team_identity SET name=?,candidates_json=?,selected_logo=COALESCE(selected_logo,1) WHERE lobby_id=? AND team_no=?',(name,candidates,lobby_id,identity['team_no']))
+    lobbies.progress(c,lobby_id)
+    after=c.execute('SELECT * FROM lobbies WHERE id=?',(lobby_id,)).fetchone()
+    if after and after['phase']=='live': start_account_game(c,lobby_id)
+
+ACCOUNT_ROUNDS=[[(1,2),(3,4)],[(1,3),(2,5)],[(1,4),(3,5)],[(1,5),(2,4)],[(2,3),(4,5)]]
+
+def start_account_game(c,lobby_id):
+    lobby=c.execute("SELECT * FROM lobbies WHERE id=? AND phase='live'",(lobby_id,)).fetchone()
+    if not lobby:return
+    existing=c.execute("SELECT id FROM lobby_game_rounds WHERE lobby_id=? AND round_no=? AND phase='live'",(lobby_id,lobby['stage_no'] or 1)).fetchone()
+    if existing:
+        c.execute('UPDATE lobbies SET active_game_id=? WHERE id=?',(existing['id'],lobby_id));return
+    stage=lobby['stage_no'] or 1
+    used=set()
+    if lobby['mode']=='challenge':
+        for row in c.execute('SELECT problem_map_json FROM lobby_game_rounds WHERE lobby_id=?',(lobby_id,)):
+            used.update(json.loads(row['problem_map_json']).values())
+    problem_map={}
+    for level in range(1,6):
+        candidates=[p for p in PROBLEMS if p['level']==level and (lobby['mode']!='challenge' or (p['id'] not in used and (p.get('set') in (6,7) if stage==6 else p.get('set') in (1,2,3,4,5))))]
+        if not candidates: candidates=[p for p in PROBLEMS if p['level']==level]
+        chosen=random.choice(candidates)
+        problem_map[str(level)]=chosen['id']
+    if lobby['mode']=='challenge' and stage==6:
+        totals=list(c.execute('SELECT team_no,win_points,solve_points FROM lobby_team_totals WHERE lobby_id=? ORDER BY win_points DESC,solve_points DESC,team_no',(lobby_id,)))
+        finalists=json.loads(lobby['finalists_json']) if lobby['finalists_json'] else [x['team_no'] for x in totals[:2]]
+        if len(finalists)<2: finalists=[1,2]
+        pairs=[tuple(finalists)]
+        # The two finalist teams receive distinct but equal-level problems.
+        for level in range(1,6):
+            options=[p for p in PROBLEMS if p['level']==level and p.get('set') in (6,7) and p['id'] not in used]
+            for team,problem in zip(finalists,options): problem_map[f'{team}:{level}']=problem['id']
+    elif lobby['mode']=='challenge': pairs=ACCOUNT_ROUNDS[min(stage-1,4)]
+    else: pairs=[(1,2)]
+    round_id=c.execute('INSERT INTO lobby_game_rounds(lobby_id,round_no,phase,started_at,ends_at,scores_json,problem_map_json) VALUES (?,?,\'live\',?,?,?,?)',
+        (lobby_id,stage,time.time(),lobby['phase_ends_at'],json.dumps({'pairs':pairs},separators=(',',':')),json.dumps(problem_map))).lastrowid
+    if lobby['mode']=='challenge' and stage==6:
+        active=set(pairs[0])
+    elif lobby['mode']=='challenge':active={team for pair in pairs for team in pair}
+    else:active={1,2}
+    for team in active:
+        players=list(c.execute('SELECT account_id,level FROM lobby_members WHERE lobby_id=? AND team_no=? AND is_operator=0 ORDER BY account_id',(lobby_id,team)))
+        if lobby['mode']=='challenge':
+            for index,member in enumerate(players):
+                level=index+1
+                problem_id=problem_map.get(f'{team}:{level}',problem_map[str(level)])
+                c.execute('INSERT INTO lobby_game_members(game_round_id,account_id,team_no,level,problem_id) VALUES (?,?,?,?,?)',(round_id,member['account_id'],team,level,problem_id))
+                c.execute('INSERT INTO lobby_game_drafts(game_round_id,account_id,code,updated_at) VALUES (?,?,\'\',?)',(round_id,member['account_id'],time.time()))
+        else:
+            for member in players:
+                level=member['level'] or random.randint(1,5);problem_id=problem_map[str(level)]
+                c.execute('UPDATE lobby_members SET level=? WHERE lobby_id=? AND account_id=?',(level,lobby_id,member['account_id']))
+                c.execute('INSERT INTO lobby_game_members(game_round_id,account_id,team_no,level,problem_id) VALUES (?,?,?,?,?)',(round_id,member['account_id'],team,level,problem_id))
+                c.execute('INSERT INTO lobby_game_drafts(game_round_id,account_id,code,updated_at) VALUES (?,?,\'\',?)',(round_id,member['account_id'],time.time()))
+        c.execute('INSERT OR IGNORE INTO lobby_team_totals(lobby_id,team_no) VALUES (?,?)',(lobby_id,team))
+    c.execute('UPDATE lobbies SET active_game_id=? WHERE id=?',(round_id,lobby_id))
+
+def settle_account_game(c,lobby_id):
+    game=c.execute("SELECT * FROM lobby_game_rounds WHERE lobby_id=? AND phase='live' ORDER BY round_no DESC LIMIT 1",(lobby_id,)).fetchone()
+    if not game:return
+    rows=list(c.execute('SELECT team_no,COALESCE(SUM(solve_earned),0) AS earned,COALESCE(SUM(solve_spent),0) AS spent FROM lobby_game_members WHERE game_round_id=? GROUP BY team_no',(game['id'],)))
+    score_data=json.loads(game['scores_json']);pairs=score_data.get('pairs',[]); winners=[];winners_by_team={}
+    for pair in pairs:
+        a,b=pair
+        points={x['team_no']:x['win_points'] for x in c.execute('SELECT team_no,win_points FROM lobby_team_totals WHERE lobby_id=?',(lobby_id,))}
+        # Scores in totals are lobby-wide; use this round's awarded points for the winner.
+        round_scores={team:c.execute('SELECT COALESCE(SUM(gm.solve_earned),0) FROM lobby_game_members gm WHERE gm.game_round_id=? AND gm.team_no=? AND gm.solved=1',(game['id'],team)).fetchone()[0] for team in (a,b)}
+        # win_points are stored in submissions' award detail by adding to the round score below.
+        award_scores={team:c.execute('SELECT COALESCE(SUM(CASE WHEN solved=1 THEN solve_earned ELSE 0 END),0) FROM lobby_game_members WHERE game_round_id=? AND team_no=?',(game['id'],team)).fetchone()[0] for team in (a,b)}
+        # Each solve's solve_earned is also its solve-point reward; score rows use an explicit per-round cache.
+        score_data=json.loads(game['scores_json']); round_scores=score_data.get('round_points',{})
+        pa=int(round_scores.get(str(a),award_scores[a]));pb=int(round_scores.get(str(b),award_scores[b]))
+        winner=a if pa>pb else b if pb>pa else None
+        if winner is None and game['round_no']==6:
+            solve={team:c.execute('SELECT solve_points FROM lobby_team_totals WHERE lobby_id=? AND team_no=?',(lobby_id,team)).fetchone()[0] for team in (a,b)}
+            winner=a if solve[a]>solve[b] else b if solve[b]>solve[a] else None
+        if winner:
+            winners.append(winner); c.execute('UPDATE lobby_team_totals SET wins=wins+1,win_points=win_points+100 WHERE lobby_id=? AND team_no=?',(lobby_id,winner))
+            loser=b if winner==a else a;c.execute('UPDATE lobby_team_totals SET losses=losses+1 WHERE lobby_id=? AND team_no=?',(lobby_id,loser))
+        winners_by_team[str(a)]=winner;winners_by_team[str(b)]=winner
+        averages={team:(c.execute('SELECT COALESCE(AVG(a.rating),1000) FROM lobby_members m JOIN accounts a ON a.id=m.account_id WHERE m.lobby_id=? AND m.team_no=? AND m.is_operator=0',(lobby_id,team)).fetchone()[0]) for team in (a,b)}
+        for team,opp in ((a,b),(b,a)):
+            members=list(c.execute('SELECT gm.account_id,gm.level,gm.solved,gm.solve_earned,gm.solve_spent,a.rating FROM lobby_game_members gm JOIN accounts a ON a.id=gm.account_id WHERE gm.game_round_id=? AND gm.team_no=?',(game['id'],team)))
+            for person in members:
+                delta=lobbies.rating_change(averages[team],averages[opp],winner==team,person['level'],bool(person['solved']),person['solve_earned']-person['solve_spent']) if winner else 0
+                c.execute('UPDATE accounts SET rating=MAX(100, rating+?),games=games+1,wins=wins+? WHERE id=?',(delta,int(winner==team),person['account_id']))
+                c.execute('UPDATE lobby_game_members SET rating_delta=? WHERE game_round_id=? AND account_id=?',(delta,game['id'],person['account_id']))
+    score_data['winners_by_team']=winners_by_team
+    c.execute("UPDATE lobby_game_rounds SET phase='results',winner_team=?,scores_json=? WHERE id=?",(winners[0] if len(pairs)==1 else None,json.dumps(score_data),game['id']))
+
+def account_lobby_view(c,lobby_id,viewer_id):
+    value=lobbies.lobby_view(c,lobby_id,viewer_id)
+    lobby=c.execute('SELECT * FROM lobbies WHERE id=?',(lobby_id,)).fetchone()
+    if lobby['phase']=='finalist_choice':
+        totals=list(c.execute('SELECT team_no,win_points,solve_points,wins,losses FROM lobby_team_totals WHERE lobby_id=? ORDER BY win_points DESC,team_no',(lobby_id,)))
+        if len(totals)>=2:
+            cutoff=totals[1]['win_points']; eligible=[dict(x) for x in totals if x['win_points']>=cutoff]
+            locked=totals[0]['team_no'] if totals[0]['win_points']>cutoff else None
+            value['finalist_choices']={'candidates':eligible,'locked_first':locked}
+    game_id=c.execute('SELECT active_game_id FROM lobbies WHERE id=?',(lobby_id,)).fetchone()[0]
+    if not game_id:return value
+    game=c.execute('SELECT * FROM lobby_game_rounds WHERE id=?',(game_id,)).fetchone()
+    member=c.execute('SELECT gm.*,d.code,d.updated_at FROM lobby_game_members gm LEFT JOIN lobby_game_drafts d ON d.game_round_id=gm.game_round_id AND d.account_id=gm.account_id WHERE gm.game_round_id=? AND gm.account_id=?',(game_id,viewer_id)).fetchone()
+    totals=[dict(x) for x in c.execute('SELECT * FROM lobby_team_totals WHERE lobby_id=? ORDER BY team_no',(lobby_id,))]
+    score_data=json.loads(game['scores_json'])
+    info={'round_no':game['round_no'],'phase':game['phase'],'started_at':game['started_at'],'ends_at':game['ends_at'],'totals':totals,'pairs':score_data.get('pairs',[]),'winners_by_team':score_data.get('winners_by_team',{})}
+    if member:
+        p=LOOKUP[member['problem_id']]
+        info['player']={'level':member['level'],'solved':bool(member['solved']),'solve_earned':member['solve_earned'],'solve_spent':member['solve_spent'],'rating_delta':member['rating_delta'],'cooldown_until':member['cooldown_until'],'code':member['code'] or ''}
+        info['problem']={**public_problem(p),**public_samples(p)}
+        info['solve_balance']=c.execute('SELECT solve_points FROM lobby_team_totals WHERE lobby_id=? AND team_no=?',(lobby_id,member['team_no'])).fetchone()[0]
+        info['hints']=[dict(x) for x in c.execute('SELECT kind,detail,cost,at FROM lobby_game_items WHERE game_round_id=? AND team_no=? ORDER BY id',(game_id,member['team_no']))]
+    info['winner_team']=game['winner_team']
+    if value.get('is_operator'):
+        players=[]
+        for x in c.execute('SELECT gm.account_id,gm.team_no,gm.level,gm.problem_id,gm.solved,gm.solve_earned,gm.solve_spent,a.nickname,d.code,d.updated_at FROM lobby_game_members gm JOIN accounts a ON a.id=gm.account_id LEFT JOIN lobby_game_drafts d ON d.game_round_id=gm.game_round_id AND d.account_id=gm.account_id WHERE gm.game_round_id=? ORDER BY gm.team_no,gm.level',(game_id,)):
+            players.append({**dict(x),'problem_title':LOOKUP[x['problem_id']]['title']})
+        info['players']=players
+    value['game']=info
+    return value
+
+def choose_account_finalists(c,lobby_id,account_id,team_a,team_b):
+    lobby=c.execute("SELECT * FROM lobbies WHERE id=? AND mode='challenge' AND phase='finalist_choice'",(lobby_id,)).fetchone()
+    member=c.execute('SELECT is_operator FROM lobby_members WHERE lobby_id=? AND account_id=?',(lobby_id,account_id)).fetchone()
+    if not lobby or not member or (lobby['owner_id']!=account_id and not member['is_operator']):raise PermissionError('로비 생성자 또는 운영자만 결승 진출팀을 확정할 수 있습니다.')
+    totals=list(c.execute('SELECT team_no,win_points FROM lobby_team_totals WHERE lobby_id=? ORDER BY win_points DESC,team_no',(lobby_id,)))
+    if len(totals)<2:raise ValueError('결승 진출팀을 정할 점수 기록이 없습니다.')
+    cutoff=totals[1]['win_points'];eligible={x['team_no'] for x in totals if x['win_points']>=cutoff}
+    locked=totals[0]['team_no'] if totals[0]['win_points']>cutoff else None
+    if type(team_a) is not int or type(team_b) is not int or team_a==team_b or team_a not in eligible or team_b not in eligible or (locked and locked not in (team_a,team_b)):
+        raise ValueError('점수 동점 후보 안에서 두 팀을 선택하세요. 단독 1위 팀이 있으면 반드시 포함해야 합니다.')
+    has_operator=c.execute('SELECT 1 FROM lobby_members WHERE lobby_id=? AND is_operator=1',(lobby_id,)).fetchone()
+    c.execute("UPDATE lobbies SET finalists_json=?,phase=?,status='running',phase_ends_at=? WHERE id=?",(json.dumps([team_a,team_b]),'operator_results' if has_operator else 'break',None if has_operator else time.time()+20,lobby_id))
+    return {'finalists':[team_a,team_b]}
+
+def skill_axis_for_problem(problem):
+    tag=problem.get('tag','')
+    if any(k in tag for k in ('문자열','접두','문자')):return 'strings'
+    if any(k in tag for k in ('탐색','검색','완전 탐색')):return 'search'
+    if any(k in tag for k in ('자료구조','스택','큐','빈도')):return 'data_structures'
+    if any(k in tag for k in ('최적화','그리디','누적합')):return 'optimization'
+    if any(k in tag for k in ('시뮬레이션','날짜','구현')):return 'simulation'
+    return 'implementation'
+
+def save_account_draft(lobby_id,account_id,code):
+    code=valid_code(code,allow_empty=True)
+    with LOCK,db() as c:
+        row=c.execute('SELECT l.phase,gm.game_round_id FROM lobbies l JOIN lobby_game_members gm ON gm.game_round_id=l.active_game_id WHERE l.id=? AND gm.account_id=?',(lobby_id,account_id)).fetchone()
+        if not row or row['phase']!='live':raise ValueError('진행 중인 경기의 코드만 저장할 수 있습니다.')
+        c.execute('UPDATE lobby_game_drafts SET code=?,updated_at=? WHERE game_round_id=? AND account_id=?',(code,time.time(),row['game_round_id'],account_id))
+        return {'saved':True}
+
+def purchase_account_hint(lobby_id,account_id,kind,code):
+    costs={'type':50,'structure':150,'assist':300}
+    if kind not in costs:raise ValueError('AI 힌트 종류를 확인하세요.')
+    code=valid_code(code,allow_empty=True)
+    with LOCK,db() as c:
+        row=c.execute("SELECT l.phase,gm.*,gr.id AS round_id,gr.phase AS game_phase FROM lobbies l JOIN lobby_game_rounds gr ON gr.id=l.active_game_id JOIN lobby_game_members gm ON gm.game_round_id=gr.id WHERE l.id=? AND gm.account_id=?",(lobby_id,account_id)).fetchone()
+        if not row or row['phase']!='live' or row['game_phase']!='live':raise ValueError('진행 중인 문제에서만 힌트를 사용할 수 있습니다.')
+        if row['solved']:raise ValueError('문제를 해결한 뒤에는 힌트를 사용할 수 없습니다.')
+        balance=c.execute('SELECT solve_points FROM lobby_team_totals WHERE lobby_id=? AND team_no=?',(lobby_id,row['team_no'])).fetchone()[0]
+        if balance<costs[kind]:raise ValueError(f"팀 solve 포인트가 부족합니다. 현재 {balance}점입니다.")
+        problem=LOOKUP[row['problem_id']]
+    if kind=='type':detail=problem['hint1']
+    elif kind=='structure':detail=problem['hint2']
+    else:detail=assist(problem,code)
+    with LOCK,db() as c:
+        current=c.execute('SELECT phase FROM lobbies WHERE id=?',(lobby_id,)).fetchone()
+        balance=c.execute('SELECT solve_points FROM lobby_team_totals WHERE lobby_id=? AND team_no=?',(lobby_id,row['team_no'])).fetchone()[0]
+        if not current or current['phase']!='live':raise ValueError('경기가 끝나 힌트를 반영하지 않았습니다.')
+        if balance<costs[kind]:raise ValueError('팀 solve 포인트가 다른 아이템 사용으로 부족해졌습니다. 비용은 차감하지 않았습니다.')
+        c.execute('UPDATE lobby_team_totals SET solve_points=solve_points-? WHERE lobby_id=? AND team_no=?',(costs[kind],lobby_id,row['team_no']))
+        c.execute('UPDATE lobby_game_members SET solve_spent=solve_spent+? WHERE game_round_id=? AND account_id=?',(costs[kind],row['round_id'],account_id))
+        c.execute('INSERT INTO lobby_game_items(game_round_id,account_id,team_no,kind,detail,cost,at) VALUES (?,?,?,?,?,?,?)',(row['round_id'],account_id,row['team_no'],kind,detail,costs[kind],time.time()))
+        return {'kind':kind,'detail':detail,'cost':costs[kind]}
+
+def submit_account_game(lobby_id,account_id,code):
+    code=valid_code(code)
+    with LOCK,db() as c:
+        row=c.execute('SELECT l.*,gm.*,gr.phase AS game_phase,gr.ends_at,gr.id AS round_id FROM lobbies l JOIN lobby_game_rounds gr ON gr.id=l.active_game_id JOIN lobby_game_members gm ON gm.game_round_id=gr.id WHERE l.id=? AND gm.account_id=?',(lobby_id,account_id)).fetchone()
+        if not row or row['phase']!='live' or row['game_phase']!='live' or row['ends_at']<=time.time():raise ValueError('현재 제출할 수 있는 진행 중인 매치가 없습니다.')
+        if row['solved']:raise ValueError('이미 정답을 제출한 문제입니다.')
+        if row['cooldown_until']>time.time():raise ValueError(f"오답 재제출까지 {max(1,round(row['cooldown_until']-time.time()))}초 남았습니다.")
+        p=LOOKUP[row['problem_id']]; key=('lobby',row['round_id'],account_id)
+        if key in SUBMITTING:raise ValueError('이미 채점 중입니다.')
+        SUBMITTING.add(key)
+        c.execute('UPDATE lobby_game_drafts SET code=?,updated_at=? WHERE game_round_id=? AND account_id=?',(code,time.time(),row['round_id'],account_id))
+    try:
+        verdict,passed,total=judge_submission(code,p)
+        with LOCK,db() as c:
+            row=c.execute('SELECT * FROM lobby_game_members WHERE game_round_id=? AND account_id=?',(row['round_id'],account_id)).fetchone()
+            current=c.execute('SELECT phase FROM lobby_game_rounds WHERE id=?',(row['game_round_id'],)).fetchone()
+            if not current or current['phase']!='live':raise ValueError('경기가 끝나 채점 결과를 반영하지 않았습니다.')
+            c.execute('INSERT INTO lobby_game_submissions(game_round_id,account_id,problem_id,code,verdict,at) VALUES (?,?,?,?,?,?)',(row['game_round_id'],account_id,row['problem_id'],code,verdict,time.time()))
+            if verdict=='정답':
+                first=c.execute('SELECT 1 FROM lobby_game_members WHERE game_round_id=? AND team_no=? AND level=? AND solved=1',(row['game_round_id'],row['team_no'],row['level'])).fetchone()
+                if not first:
+                    game=c.execute('SELECT scores_json FROM lobby_game_rounds WHERE id=?',(row['game_round_id'],)).fetchone();meta=json.loads(game['scores_json']);pairs=meta.get('pairs',[])
+                    opp=next((b if a==row['team_no'] else a for a,b in pairs if row['team_no'] in (a,b)),None)
+                    rival=c.execute('SELECT 1 FROM lobby_game_members WHERE game_round_id=? AND team_no=? AND level=? AND solved=1',(row['game_round_id'],opp,row['level'])).fetchone() if opp else None
+                    final_round=c.execute('SELECT round_no FROM lobby_game_rounds WHERE id=?',(row['game_round_id'],)).fetchone()[0]==6
+                    win_points=REWARD[row['level']] if final_round or not rival else REWARD[row['level']]//2
+                    meta.setdefault('round_points',{})[str(row['team_no'])]=meta.setdefault('round_points',{}).get(str(row['team_no']),0)+win_points
+                    c.execute('UPDATE lobby_game_rounds SET scores_json=? WHERE id=?',(json.dumps(meta),row['game_round_id']))
+                    c.execute('UPDATE lobby_team_totals SET win_points=win_points+? WHERE lobby_id=? AND team_no=?',(win_points,lobby_id,row['team_no']))
+                c.execute('UPDATE lobby_game_members SET solved=1,solve_earned=? WHERE game_round_id=? AND account_id=?',(REWARD[row['level']],row['game_round_id'],account_id))
+                c.execute('UPDATE lobby_team_totals SET solve_points=solve_points+? WHERE lobby_id=? AND team_no=?',(REWARD[row['level']],lobby_id,row['team_no']))
+                axis=skill_axis_for_problem(p)
+                c.execute('UPDATE account_stats SET value=MIN(100,value+?) WHERE account_id=? AND axis=?',(max(1,passed*5),account_id,axis))
+            else:
+                c.execute('UPDATE lobby_game_members SET cooldown_until=? WHERE game_round_id=? AND account_id=?',(time.time()+10,row['game_round_id'],account_id))
+            return {'verdict':verdict,'passed':passed,'total':total,'lobby':account_lobby_view(c,lobby_id,account_id)}
+    finally:
+        SUBMITTING.discard(key)
+
+def lobby_logo_worker(lobby_id,team_no,name,captain_id):
+    try:
+        images=create_logos(name)
+    except Exception:
+        images=placeholders(name)
+    with LOCK,db() as c:
+        identity=c.execute('SELECT * FROM lobby_team_identity WHERE lobby_id=? AND team_no=? AND captain_id=?',(lobby_id,team_no,captain_id)).fetchone()
+        if not identity or identity['name']!=name:return
+        c.execute('UPDATE lobby_team_identity SET candidates_json=? WHERE lobby_id=? AND team_no=?',(json.dumps(images),lobby_id,team_no))
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args): pass
     def cors(self):
@@ -472,12 +776,120 @@ class Handler(BaseHTTPRequestHandler):
         u=c.execute('SELECT * FROM users WHERE token=?',(token,)).fetchone()
         if not u: raise PermissionError('참가 코드를 확인하세요.')
         return u
+    def account(self,c):
+        token=self.headers.get('Authorization','').removeprefix('Bearer ')
+        row=accounts.account_for_token(c,token)
+        if not row: raise PermissionError('로그인이 만료되었습니다. 다시 로그인하세요.')
+        return row
+    def auth_post(self,path,b):
+        if path=='/api/auth/register/start':
+            with LOCK,db() as c: email,code=accounts.begin_registration(c,b,CONSENT_VERSION)
+            send_code(email,code,'register')
+            return self.send({'ok':True,'message':'인증 코드를 이메일로 보냈습니다. 10분 안에 입력하세요.'})
+        if path=='/api/auth/register/verify':
+            with LOCK,db() as c:
+                account_id=accounts.verify_registration(c,b.get('email'),b.get('code'),CONSENT_VERSION)
+                row=c.execute('SELECT * FROM accounts WHERE id=?',(account_id,)).fetchone()
+                token=accounts.create_session(c,account_id)
+            return self.send({'token':token,'me':account_summary(None,row)})
+        if path=='/api/auth/login':
+            with LOCK,db() as c: token,row=accounts.login(c,b.get('username'),b.get('password'))
+            with db() as c: row=c.execute('SELECT * FROM accounts WHERE id=?',(row['id'],)).fetchone(); me=account_summary(c,row)
+            return self.send({'token':token,'me':me})
+        if path=='/api/auth/logout':
+            raw=self.headers.get('Authorization','').removeprefix('Bearer ')
+            with LOCK,db() as c: c.execute('DELETE FROM account_sessions WHERE token_hash=?',(accounts.opaque_hash(raw),))
+            return self.send({'ok':True})
+        if path=='/api/auth/recovery/start':
+            kind=b.get('kind');email=b.get('email')
+            with LOCK,db() as c: email,code,found=accounts.begin_recovery(c,email,kind)
+            if found: send_code(email,code,'recovery')
+            return self.send({'ok':True,'message':'등록된 이메일이면 인증 코드를 보냈습니다.'})
+        if path=='/api/auth/recovery/finish':
+            with LOCK,db() as c: result=accounts.finish_recovery(c,b.get('email'),b.get('kind'),b.get('code'),b.get('new_password'))
+            return self.send(result)
+        raise ValueError('지원하지 않는 인증 요청입니다.')
+
+    def account_post(self,path,b):
+        with LOCK,db() as c:
+            me=self.account(c)
+            if path=='/api/account/nickname':
+                nick=accounts.validate_nickname(b.get('nickname'))
+                if c.execute('SELECT 1 FROM accounts WHERE nickname=? COLLATE NOCASE AND id!=?',(nick,me['id'])).fetchone(): raise ValueError('이미 사용 중인 닉네임입니다.')
+                c.execute('UPDATE accounts SET nickname=? WHERE id=?',(nick,me['id']))
+            elif path=='/api/account/avatar':
+                avatar=b.get('avatar_id')
+                if type(avatar) is not int or avatar not in range(1,6): raise ValueError('기본 아이콘 5개 중에서 선택하세요.')
+                c.execute('UPDATE accounts SET avatar_id=? WHERE id=?',(avatar,me['id']))
+            elif path=='/api/lobby/create':
+                lid=lobbies.create_lobby(c,me['id'],b.get('name',''),b.get('mode'))
+                return self.send(lobbies.lobby_view(c,lid,me['id']))
+            elif path=='/api/lobby/join':
+                lobbies.join_lobby(c,int(b.get('lobby_id',0)),me['id'],b.get('team_no'))
+            elif path=='/api/lobby/leave':
+                lid=int(b.get('lobby_id',0)); target=c.execute('SELECT visibility,phase FROM lobbies WHERE id=?',(lid,)).fetchone()
+                if target and target['visibility']=='private' and target['phase'] in ('countdown','level_select','start_countdown'):
+                    raise ValueError('자동 매칭이 시작되는 동안에는 로비를 나갈 수 없습니다.')
+                c.execute('DELETE FROM lobby_members WHERE lobby_id=? AND account_id=?',(lid,me['id']))
+                if target and target['visibility']=='private':c.execute('DELETE FROM matchmaking_queue WHERE account_id=? AND batch_lobby_id=?',(me['id'],lid))
+                c.execute("UPDATE lobbies SET status='cancelled' WHERE id=? AND owner_id=? AND NOT EXISTS(SELECT 1 FROM lobby_members WHERE lobby_id=? AND account_id=owner_id)",(lid,me['id'],lid))
+            elif path=='/api/lobby/draft': return self.send(save_account_draft(int(b.get('lobby_id',0)),me['id'],b.get('code','')))
+            elif path=='/api/lobby/move': lobbies.move_team(c,int(b.get('lobby_id',0)),me['id'],int(b.get('team_no',0)))
+            elif path=='/api/lobby/ready': lobbies.set_ready(c,int(b.get('lobby_id',0)),me['id'],b.get('ready') is True)
+            elif path=='/api/lobby/swap-request': lobbies.request_swap(c,int(b.get('lobby_id',0)),me['id'],int(b.get('target_id',0)))
+            elif path=='/api/lobby/swap-response': lobbies.respond_swap(c,int(b.get('request_id',0)),me['id'],b.get('accept') is True)
+            elif path=='/api/lobby/start': lobbies.start_lobby(c,int(b.get('lobby_id',0)),me['id'])
+            elif path=='/api/lobby/level': lobbies.choose_level(c,int(b.get('lobby_id',0)),me['id'],b.get('level'))
+            elif path=='/api/lobby/operator-seat':
+                if not me['is_operator']: raise PermissionError('운영자 계정만 운영자 자리에 참여할 수 있습니다.')
+                lobbies.join_operator(c,int(b.get('lobby_id',0)),me['id'])
+            elif path=='/api/lobby/captain-vote': lobbies.cast_captain_vote(c,int(b.get('lobby_id',0)),me['id'],int(b.get('candidate_id',0)))
+            elif path=='/api/lobby/team-name':
+                lid=int(b.get('lobby_id',0)); team=int(b.get('team_no',0)); name=valid_name(b.get('name'),24)
+                phase=c.execute('SELECT phase FROM lobbies WHERE id=?',(lid,)).fetchone()
+                identity=c.execute('SELECT * FROM lobby_team_identity WHERE lobby_id=? AND team_no=? AND captain_id=?',(lid,team,me['id'])).fetchone()
+                if not identity or not phase or phase['phase']!='team_setup': raise PermissionError('팀 설정 시간에 해당 팀의 팀장만 팀명을 정할 수 있습니다.')
+                c.execute('UPDATE lobby_team_identity SET name=?,candidates_json=?,selected_logo=NULL WHERE lobby_id=? AND team_no=?',(name,json.dumps(placeholders(name)),lid,team))
+                if os.environ.get('OPENAI_API_KEY'):
+                    threading.Thread(target=lobby_logo_worker,args=(lid,team,name,me['id']),daemon=True).start()
+            elif path=='/api/lobby/choose-logo':
+                lid=int(b.get('lobby_id',0)); team=int(b.get('team_no',0)); slot=b.get('slot')
+                phase=c.execute('SELECT phase FROM lobbies WHERE id=?',(lid,)).fetchone()
+                identity=c.execute('SELECT * FROM lobby_team_identity WHERE lobby_id=? AND team_no=? AND captain_id=?',(lid,team,me['id'])).fetchone()
+                if not identity or not phase or phase['phase']!='team_setup' or not identity['name'] or type(slot) is not int or slot not in (1,2,3): raise ValueError('팀 설정 시간에 팀 이름과 로고 후보를 확인하세요.')
+                c.execute('UPDATE lobby_team_identity SET selected_logo=? WHERE lobby_id=? AND team_no=?',(slot,lid,team))
+            elif path=='/api/lobby/operator-start': lobbies.operator_start(c,int(b.get('lobby_id',0)),me['id'])
+            elif path=='/api/lobby/operator-close':
+                lid=int(b.get('lobby_id',0));settle_account_game(c,lid);lobbies.operator_close(c,lid,me['id'])
+            elif path=='/api/lobby/operator-next': lobbies.operator_next(c,int(b.get('lobby_id',0)),me['id'])
+            elif path=='/api/lobby/finalists':
+                return self.send(choose_account_finalists(c,int(b.get('lobby_id',0)),me['id'],b.get('team_a'),b.get('team_b')))
+            elif path=='/api/friends/request': friend_request(c,me['id'],b.get('nickname'))
+            elif path=='/api/friends/respond': friend_respond(c,me['id'],int(b.get('requester_id',0)),b.get('accept') is True)
+            elif path=='/api/matchmaking/join': queue_join(c,me['id'])
+            elif path=='/api/matchmaking/cancel': c.execute('DELETE FROM matchmaking_queue WHERE account_id=?',(me['id'],))
+            else: raise ValueError('지원하지 않는 요청입니다.')
+            return self.send(account_home(c,me))
+
     def do_OPTIONS(self):
         if not FRONTEND_ORIGIN or self.headers.get('Origin')!=FRONTEND_ORIGIN: return self.send({'error':'허용되지 않은 출처'},403)
         self.send_response(204); self.cors(); self.end_headers()
     def do_GET(self):
         parsed=urlparse(self.path); path=parsed.path
         try:
+            if path=='/api/privacy': return self.send({'version':CONSENT_VERSION,'notice':PRIVACY_NOTICE})
+            if path in ('/api/account/me','/api/home','/api/lobbies') or path.startswith('/api/lobby/'):
+                with LOCK,db() as c:
+                    me=self.account(c)
+                    c.execute("UPDATE team_swap_requests SET status='expired' WHERE status='pending' AND expires_at<=?",(time.time(),))
+                    for active in c.execute("SELECT id FROM lobbies WHERE status IN ('running','results')").fetchall(): progress_lobby(c,active['id'])
+                    if path=='/api/account/me': result=account_summary(c,me)
+                    elif path in ('/api/home','/api/lobbies'): result=account_home(c,me)
+                    else:
+                        parts=path.strip('/').split('/')
+                        if len(parts)!=3: raise ValueError('로비 주소를 확인하세요.')
+                        lid=int(parts[2]); progress_lobby(c,lid); result=account_lobby_view(c,lid,me['id'])
+                return self.send(result)
             if path.startswith('/api/logo/'):
                 tid=int(path.rsplit('/',1)[1]); slot=parse_qs(parsed.query).get('slot',[None])[0]
                 with db() as c:
@@ -513,6 +925,16 @@ class Handler(BaseHTTPRequestHandler):
             if not 0<n<100000: raise ValueError('요청 크기가 잘못되었습니다.')
             b=json.loads(self.rfile.read(n)); path=urlparse(self.path).path
             if not isinstance(b,dict): raise ValueError('JSON 객체가 필요합니다.')
+            if path.startswith('/api/auth/'):
+                return self.auth_post(path,b)
+            if path=='/api/lobby/submit':
+                with LOCK,db() as c: me=self.account(c)
+                return self.send(submit_account_game(int(b.get('lobby_id',0)),me['id'],b.get('code','')))
+            if path=='/api/lobby/hint':
+                with LOCK,db() as c: me=self.account(c)
+                return self.send(purchase_account_hint(int(b.get('lobby_id',0)),me['id'],b.get('kind'),b.get('code','')))
+            if path.startswith('/api/lobby/') or path.startswith('/api/matchmaking/') or path.startswith('/api/friends/') or path.startswith('/api/account/'):
+                return self.account_post(path,b)
             if path=='/api/submit': return self.submit_code(b)
             if path=='/api/hint' and b.get('kind')=='assist': return self.ai_hint(b)
             with LOCK,db() as c:

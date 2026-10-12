@@ -1,5 +1,17 @@
 # Code Rumble · 문제집·결승 규칙 개정판
 
+## 계정·로비 전환판 추가 안내 (2026-10-12)
+
+새 첫 화면은 계정 로그인입니다. 기존 액세스 코드는 새 계정 화면에서 사용하지 않습니다. 계정 가입과 아이디·비밀번호 복구는 이메일 인증을 사용하므로 Render의 Environment에 `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`을 설정해야 합니다. 이메일 인증 없이 회원가입을 켜지 않도록 구성되어 있습니다.
+
+운영자 계정이 아직 없으면 최초 실행 전에 `BOOTSTRAP_OPERATOR_ID`, `BOOTSTRAP_OPERATOR_PASSWORD`, `BOOTSTRAP_OPERATOR_EMAIL`, `BOOTSTRAP_OPERATOR_NAME`을 설정하세요. 비밀번호는 8~20자여야 하며, 이미 같은 아이디 계정이 있으면 환경변수로 권한·비밀번호를 덮어쓰지 않습니다. 배포 후 계정 생성, 이메일 인증, 로그인부터 확인하세요.
+
+회원가입 양식은 `privacy_notice.py`의 개인정보 안내와 동의 버전을 표시합니다. 실제 배포 전 `[개인정보처리자/대회 운영자 이름을 입력하세요]`와 `[개인정보 문의 이메일 또는 연락처를 입력하세요]`를 실제 운영자 정보로 바꾸고, 보유기간과 외부 서비스 처리 내용을 운영 방식에 맞게 검토하세요. 이 파일은 동의 화면의 초안이며 운영자의 개인정보 처리 방침 검토를 대신하지 않습니다.
+
+Render 변수 목록은 `render.yaml`에도 추가되어 있습니다. Blueprint 없이 기존 서비스에 직접 설정하는 경우에도 위 SMTP·운영자 변수를 각각 추가한 뒤 Render와 Netlify를 재배포하세요. OpenAI 채점·AI 조언·로고 후보 기능은 기존 `OPENAI_API_KEY` 설정을 사용합니다.
+
+이 버전에서 새 계정 로비는 일반 5대5 단판과 챌린지 5팀 대회, 랭크 10인 매칭을 사용합니다. 일반 매치와 챌린지 라운드는 5분, 챌린지 결승은 10분입니다. 새 화면의 신규 로비 데이터와 기존 액세스 코드 기반 대회 데이터는 별도 흐름입니다.
+
 재업로드한 문제집의 25문제를 모두 읽고 레벨을 배정했습니다. 럼블 25문제와 서로 다른 결승 신작 10문제, 유형·로직 힌트, 숨은 테스트를 제공합니다. 배정표는 `docs/source-check.md`에서 확인하세요.
 
 **처음 적용할 때는 [START-HERE.md](START-HERE.md)를 위에서부터 따라 하세요.** 채점·AI 조언·팀 로고에 같은 OpenAI API 키를 사용합니다.
@@ -18,7 +30,7 @@
 python server.py
 ```
 
-Windows에서는 `py -3 server.py`도 가능합니다. http://127.0.0.1:8765 에 접속하세요. 첫 실행 후 `data/access.json`의 admin 코드는 운영자용, teams 아래 code는 선수용입니다. 각 탭에 다른 코드로 로그인할 수 있습니다.
+Windows에서는 `py -3 server.py`도 가능합니다. http://127.0.0.1:8765 에 접속하세요. 첫 화면에서 계정을 만들고 SMTP 이메일 인증 코드를 입력해 로그인합니다. 운영자 계정은 위 `BOOTSTRAP_OPERATOR_*` 변수를 설정한 후 서버를 시작해 만듭니다. `data/access.json`은 이전 코드 기반 화면과의 호환용 파일이며 새 계정 화면에서는 사용하지 않습니다.
 
 **이 버전은 공개 Render 서버에서 OpenAI 채점에 연결됩니다.** `JUDGE_PROVIDER=openai`와 `OPENAI_API_KEY`를 설정해야 합니다. 제출 코드는 OpenAI의 새 컨테이너에서 실행되며 Render의 Python으로 실행하지 않습니다. 로컬 환경은 기본적으로 기존 로컬 채점기를 사용합니다. 실제 API 키가 제공되지 않아 유료 API의 실연결 검증은 하지 못했습니다. 운영자 연결 시험과 25명 동시 제출 리허설을 마친 뒤 대회를 진행하세요.
 
@@ -143,7 +155,7 @@ API 키 자체를 구매하는 것이 아니라 **OpenAI API 사용량을 결제
 
 현재 `render.yaml`은 `plan: free`입니다. 별도 디스크를 생성하지 않습니다. `render-paid.yaml`은 선택 가능한 유료 저장소 구성으로 기본 배포에 사용되지 않습니다.
 
-Git 저장소 루트에 모든 Python 파일과 `static/`, `netlify.toml`, `render.yaml`을 올립니다. Netlify 게시 폴더는 `static`, 빌드 명령은 없습니다. 기존 Render 서비스의 Environment에서 `FRONTEND_ORIGIN`에 실제 Netlify 주소를, `ACCESS_SEED`에 32자 이상의 비밀값을 입력합니다.
+Git 저장소 루트에 모든 Python 파일과 `static/`, `netlify.toml`, `render.yaml`을 올립니다. Netlify 게시 폴더는 `static`, 빌드 명령은 없습니다. 기존 Render 서비스의 Environment에서 `FRONTEND_ORIGIN`에 실제 Netlify 주소를, 이메일·운영자 계정은 위의 SMTP 및 `BOOTSTRAP_OPERATOR_*` 항목을 설정합니다. `ACCESS_SEED`는 이전 코드 기반 경로와의 호환을 위해 유지할 때만 필요합니다.
 
 ```powershell
 # 비밀값을 새로 만들어야 하는 경우에만 실행
@@ -194,3 +206,6 @@ node tests/test_frontend.js
 
 
 문제 그림은 `static/problem-images/`에 포함되어 있습니다. 이 폴더까지 Netlify에 배포하고, `problem_figures.json`을 Python 파일과 함께 Render에 반영하세요. 원본 6문제의 그림 11장과 결승 4문제의 도식이 포함됩니다. 참가자 화면과 운영자 문제 보기, 문제 문서에서 ‘테스트케이스 하나의 입력 형식’과 ‘예제 해설’ 구역은 제거했습니다.
+
+
+참가자 풀이 화면은 데스크톱에서 문제 영역과 코드 영역을 5:3으로 배치합니다. 팀 solve포인트 사용 패널은 코드 편집기 바로 위에서 같은 너비로 표시하고, 세 힌트 버튼을 가로로 나열합니다. 작은 화면(760px 이하)은 한 열로 전환합니다.

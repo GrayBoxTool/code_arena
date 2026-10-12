@@ -23,3 +23,21 @@ services:
         value: gpt-4.1-mini
       - key: OPENAI_MODEL
         value: gpt-4.1-mini
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: BOOTSTRAP_OPERATOR_ID
+        sync: false
+      - key: BOOTSTRAP_OPERATOR_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_OPERATOR_EMAIL
+        sync: false
+      - key: BOOTSTRAP_OPERATOR_NAME
+        sync: false
