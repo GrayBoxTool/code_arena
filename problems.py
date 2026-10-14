@@ -61,9 +61,22 @@ def public_problem(problem):
 
 from rumble_bank import build_rumble
 from final_bank import build_final
-PROBLEMS = build_rumble() + build_final()
+from supplemental_bank import build_supplemental
+PROBLEMS = build_rumble() + build_final() + build_supplemental()
 import json
 from pathlib import Path
+# New banks can be added without modifying the curated Python bank files.
+_EXTRA_PATH=Path(__file__).with_name('problem_bank_extra.json')
+if _EXTRA_PATH.exists():
+    extra=json.loads(_EXTRA_PATH.read_text(encoding='utf-8')).get('problems',[])
+    known={p['id'] for p in PROBLEMS}
+    required={'id','level','title','statement','input','output','constraints','tag','hint1','hint2','solution','cases'}
+    for p in extra:
+        if not required.issubset(p) or p['id'] in known or type(p['level']) is not int or p['level'] not in range(1,6):
+            raise ValueError('추가 문제의 필드·레벨·중복 ID를 확인하세요.')
+        if len(p['cases'])<11 or any(not isinstance(case,str) or not case.endswith('\n') for case in p['cases']):
+            raise ValueError('추가 문제는 예제 2개를 포함해 11개 이상의 줄바꿈으로 끝나는 테스트케이스가 필요합니다.')
+        p.setdefault('set',1);known.add(p['id']);PROBLEMS.append(p)
 _FIGURES=json.loads(Path(__file__).with_name("problem_figures.json").read_text(encoding="utf-8"))
 for p in PROBLEMS:
     p["figures"]=_FIGURES.get(p["id"],[])

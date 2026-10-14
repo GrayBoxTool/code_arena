@@ -1,0 +1,948 @@
+{
+  "version": 1,
+  "scale": "100~3000; 참가자 레이트와 같은 상대적 척도",
+  "problems": {
+    "S1-L1": {
+      "difficulty_rating": 574,
+      "eligible_levels": [
+        1
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "반복문",
+        "조건문"
+      ],
+      "estimated_seconds": 120,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 2,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 4
+    },
+    "S1-L2": {
+      "difficulty_rating": 846,
+      "eligible_levels": [
+        2
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "누적합",
+        "날짜 계산"
+      ],
+      "estimated_seconds": 150,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 3,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 20
+      },
+      "difficulty_band": 6
+    },
+    "S1-L3": {
+      "difficulty_rating": 1074,
+      "eligible_levels": [
+        3
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "집합",
+        "포함과 배제"
+      ],
+      "estimated_seconds": 180,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 2,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 7
+    },
+    "S1-L4": {
+      "difficulty_rating": 1346,
+      "eligible_levels": [
+        4
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "조합",
+        "집합",
+        "정렬"
+      ],
+      "estimated_seconds": 210,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 3,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 20
+      },
+      "difficulty_band": 9
+    },
+    "S1-L5": {
+      "difficulty_rating": 1622,
+      "eligible_levels": [
+        5
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "구간 분할",
+        "누적합"
+      ],
+      "estimated_seconds": 240,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 6,
+        "loop_depth": 2,
+        "branches": 0,
+        "algorithm_weight": 20
+      },
+      "difficulty_band": 11
+    },
+    "S2-L1": {
+      "difficulty_rating": 574,
+      "eligible_levels": [
+        1
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "조건 분기",
+        "산술"
+      ],
+      "estimated_seconds": 120,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 2,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 4
+    },
+    "S2-L2": {
+      "difficulty_rating": 835,
+      "eligible_levels": [
+        2
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "완전 탐색",
+        "구간 순회"
+      ],
+      "estimated_seconds": 150,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 5,
+        "loop_depth": 0,
+        "branches": 1,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 6
+    },
+    "S2-L3": {
+      "difficulty_rating": 1076,
+      "eligible_levels": [
+        3
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "배열",
+        "인접 비교"
+      ],
+      "estimated_seconds": 180,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 3,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 7
+    },
+    "S2-L4": {
+      "difficulty_rating": 1346,
+      "eligible_levels": [
+        4
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "문자열",
+        "위치별 개수"
+      ],
+      "estimated_seconds": 210,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 8,
+        "loop_depth": 1,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 9
+    },
+    "S2-L5": {
+      "difficulty_rating": 1594,
+      "eligible_levels": [
+        5
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "리스트 삽입",
+        "원형 순회"
+      ],
+      "estimated_seconds": 240,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 7,
+        "loop_depth": 1,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 11
+    },
+    "S3-L1": {
+      "difficulty_rating": 596,
+      "eligible_levels": [
+        1
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "정렬"
+      ],
+      "estimated_seconds": 120,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 3,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 20
+      },
+      "difficulty_band": 4
+    },
+    "S3-L2": {
+      "difficulty_rating": 847,
+      "eligible_levels": [
+        2
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "스택"
+      ],
+      "estimated_seconds": 150,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 6,
+        "loop_depth": 1,
+        "branches": 1,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 6
+    },
+    "S3-L3": {
+      "difficulty_rating": 1096,
+      "eligible_levels": [
+        3
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "날짜 누적합",
+        "나머지"
+      ],
+      "estimated_seconds": 180,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 3,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 20
+      },
+      "difficulty_band": 7
+    },
+    "S3-L4": {
+      "difficulty_rating": 1352,
+      "eligible_levels": [
+        4
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "문자열",
+        "접두어 집합"
+      ],
+      "estimated_seconds": 210,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 6,
+        "loop_depth": 2,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 9
+    },
+    "S3-L5": {
+      "difficulty_rating": 1632,
+      "eligible_levels": [
+        5
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "부분집합",
+        "백트래킹"
+      ],
+      "estimated_seconds": 240,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 6,
+        "loop_depth": 1,
+        "branches": 0,
+        "algorithm_weight": 40
+      },
+      "difficulty_band": 11
+    },
+    "S4-L1": {
+      "difficulty_rating": 578,
+      "eligible_levels": [
+        1
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "나눗셈",
+        "나머지"
+      ],
+      "estimated_seconds": 120,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 4,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 4
+    },
+    "S4-L2": {
+      "difficulty_rating": 842,
+      "eligible_levels": [
+        2
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "문자열",
+        "출력 형식"
+      ],
+      "estimated_seconds": 150,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 6,
+        "loop_depth": 1,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 6
+    },
+    "S4-L3": {
+      "difficulty_rating": 1074,
+      "eligible_levels": [
+        3
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "빈도",
+        "홀짝"
+      ],
+      "estimated_seconds": 180,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 2,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 7
+    },
+    "S4-L4": {
+      "difficulty_rating": 1350,
+      "eligible_levels": [
+        4
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "좌표 변환",
+        "삼각수"
+      ],
+      "estimated_seconds": 210,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 10,
+        "loop_depth": 1,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 9
+    },
+    "S4-L5": {
+      "difficulty_rating": 1615,
+      "eligible_levels": [
+        5
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "정수론",
+        "약수"
+      ],
+      "estimated_seconds": 240,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 10,
+        "loop_depth": 2,
+        "branches": 1,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 11
+    },
+    "S5-L1": {
+      "difficulty_rating": 594,
+      "eligible_levels": [
+        1
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "정렬",
+        "반올림"
+      ],
+      "estimated_seconds": 120,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 2,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 20
+      },
+      "difficulty_band": 4
+    },
+    "S5-L2": {
+      "difficulty_rating": 840,
+      "eligible_levels": [
+        2
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "빈도 배열"
+      ],
+      "estimated_seconds": 150,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 5,
+        "loop_depth": 1,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 6
+    },
+    "S5-L3": {
+      "difficulty_rating": 1092,
+      "eligible_levels": [
+        3
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "배열",
+        "구간 갱신"
+      ],
+      "estimated_seconds": 180,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 6,
+        "loop_depth": 1,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 7
+    },
+    "S5-L4": {
+      "difficulty_rating": 1365,
+      "eligible_levels": [
+        4
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "순회",
+        "조건 탐색"
+      ],
+      "estimated_seconds": 210,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 10,
+        "loop_depth": 2,
+        "branches": 1,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 9
+    },
+    "S5-L5": {
+      "difficulty_rating": 1662,
+      "eligible_levels": [
+        5
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "0/1 배낭",
+        "부분집합"
+      ],
+      "estimated_seconds": 240,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 6,
+        "loop_depth": 2,
+        "branches": 0,
+        "algorithm_weight": 60
+      },
+      "difficulty_band": 11
+    },
+    "FA-L1": {
+      "difficulty_rating": 776,
+      "eligible_levels": [
+        1
+      ],
+      "stage": "final",
+      "algorithm_tags": [
+        "조건문",
+        "누적 합"
+      ],
+      "estimated_seconds": 240,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 3,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 20
+      },
+      "difficulty_band": 5
+    },
+    "FA-L2": {
+      "difficulty_rating": 1036,
+      "eligible_levels": [
+        2
+      ],
+      "stage": "final",
+      "algorithm_tags": [
+        "스택",
+        "연속 개수"
+      ],
+      "estimated_seconds": 300,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 8,
+        "loop_depth": 1,
+        "branches": 2,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 7
+    },
+    "FA-L3": {
+      "difficulty_rating": 1284,
+      "eligible_levels": [
+        3
+      ],
+      "stage": "final",
+      "algorithm_tags": [
+        "문자열",
+        "접두어 빈도"
+      ],
+      "estimated_seconds": 360,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 7,
+        "loop_depth": 2,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 9
+    },
+    "FA-L4": {
+      "difficulty_rating": 1613,
+      "eligible_levels": [
+        4
+      ],
+      "stage": "final",
+      "algorithm_tags": [
+        "0/1 배낭",
+        "개수 상태"
+      ],
+      "estimated_seconds": 420,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 9,
+        "loop_depth": 3,
+        "branches": 1,
+        "algorithm_weight": 60
+      },
+      "difficulty_band": 11
+    },
+    "FA-L5": {
+      "difficulty_rating": 1854,
+      "eligible_levels": [
+        5
+      ],
+      "stage": "final",
+      "algorithm_tags": [
+        "동적 계획법",
+        "구간 분할"
+      ],
+      "estimated_seconds": 480,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 12,
+        "loop_depth": 2,
+        "branches": 0,
+        "algorithm_weight": 60
+      },
+      "difficulty_band": 12
+    },
+    "FB-L1": {
+      "difficulty_rating": 776,
+      "eligible_levels": [
+        1
+      ],
+      "stage": "final",
+      "algorithm_tags": [
+        "정렬",
+        "그리디"
+      ],
+      "estimated_seconds": 240,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 3,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 20
+      },
+      "difficulty_band": 5
+    },
+    "FB-L2": {
+      "difficulty_rating": 1055,
+      "eligible_levels": [
+        2
+      ],
+      "stage": "final",
+      "algorithm_tags": [
+        "구간 겹침",
+        "누적 길이"
+      ],
+      "estimated_seconds": 300,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 10,
+        "loop_depth": 1,
+        "branches": 1,
+        "algorithm_weight": 20
+      },
+      "difficulty_band": 7
+    },
+    "FB-L3": {
+      "difficulty_rating": 1298,
+      "eligible_levels": [
+        3
+      ],
+      "stage": "final",
+      "algorithm_tags": [
+        "차분 배열",
+        "누적합"
+      ],
+      "estimated_seconds": 360,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 9,
+        "loop_depth": 1,
+        "branches": 0,
+        "algorithm_weight": 20
+      },
+      "difficulty_band": 9
+    },
+    "FB-L4": {
+      "difficulty_rating": 1536,
+      "eligible_levels": [
+        4
+      ],
+      "stage": "final",
+      "algorithm_tags": [
+        "부분집합",
+        "개수별 도달 합"
+      ],
+      "estimated_seconds": 420,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 8,
+        "loop_depth": 2,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 10
+    },
+    "FB-L5": {
+      "difficulty_rating": 1838,
+      "eligible_levels": [
+        5
+      ],
+      "stage": "final",
+      "algorithm_tags": [
+        "동적 계획법",
+        "원형 인접 제약"
+      ],
+      "estimated_seconds": 480,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 9,
+        "loop_depth": 1,
+        "branches": 0,
+        "algorithm_weight": 60
+      },
+      "difficulty_band": 12
+    },
+    "EA-L1": {
+      "difficulty_rating": 610,
+      "eligible_levels": [
+        1
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "반복문",
+        "누적 합"
+      ],
+      "estimated_seconds": 120,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 5,
+        "loop_depth": 1,
+        "branches": 0,
+        "algorithm_weight": 20
+      },
+      "difficulty_band": 4
+    },
+    "EB-L1": {
+      "difficulty_rating": 576,
+      "eligible_levels": [
+        1
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "조건문",
+        "개수 세기"
+      ],
+      "estimated_seconds": 120,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 3,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 4
+    },
+    "EA-L2": {
+      "difficulty_rating": 842,
+      "eligible_levels": [
+        2
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "문자열",
+        "연속 구간"
+      ],
+      "estimated_seconds": 150,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 6,
+        "loop_depth": 1,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 6
+    },
+    "EB-L2": {
+      "difficulty_rating": 824,
+      "eligible_levels": [
+        2
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "집합",
+        "중복 제거"
+      ],
+      "estimated_seconds": 150,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 2,
+        "loop_depth": 0,
+        "branches": 0,
+        "algorithm_weight": 0
+      },
+      "difficulty_band": 5
+    },
+    "EA-L3": {
+      "difficulty_rating": 1114,
+      "eligible_levels": [
+        3
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "누적 합",
+        "구간 합"
+      ],
+      "estimated_seconds": 180,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 7,
+        "loop_depth": 1,
+        "branches": 0,
+        "algorithm_weight": 20
+      },
+      "difficulty_band": 7
+    },
+    "EB-L3": {
+      "difficulty_rating": 1110,
+      "eligible_levels": [
+        3
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "슬라이딩 윈도우"
+      ],
+      "estimated_seconds": 180,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 5,
+        "loop_depth": 1,
+        "branches": 0,
+        "algorithm_weight": 20
+      },
+      "difficulty_band": 7
+    },
+    "EA-L4": {
+      "difficulty_rating": 1401,
+      "eligible_levels": [
+        4
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "그래프",
+        "BFS 또는 DFS"
+      ],
+      "estimated_seconds": 210,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 8,
+        "loop_depth": 2,
+        "branches": 1,
+        "algorithm_weight": 40
+      },
+      "difficulty_band": 9
+    },
+    "EB-L4": {
+      "difficulty_rating": 1399,
+      "eligible_levels": [
+        4
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "격자",
+        "BFS"
+      ],
+      "estimated_seconds": 210,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 7,
+        "loop_depth": 2,
+        "branches": 1,
+        "algorithm_weight": 40
+      },
+      "difficulty_band": 9
+    },
+    "EA-L5": {
+      "difficulty_rating": 1667,
+      "eligible_levels": [
+        5
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "동적 계획법",
+        "격자"
+      ],
+      "estimated_seconds": 240,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 6,
+        "loop_depth": 2,
+        "branches": 1,
+        "algorithm_weight": 60
+      },
+      "difficulty_band": 11
+    },
+    "EB-L5": {
+      "difficulty_rating": 1660,
+      "eligible_levels": [
+        5
+      ],
+      "stage": "rumble",
+      "algorithm_tags": [
+        "동적 계획법",
+        "0-1 배낭"
+      ],
+      "estimated_seconds": 240,
+      "assessment": "알고리즘 유형·풀이 구현 줄 수·반복문 깊이·분기 수에 따른 초기 추정. 운영자가 제약조건을 검토하여 수정하고, 실제 경기 30개 이상부터 결과 통계를 반영합니다.",
+      "revision": 1,
+      "assessment_features": {
+        "solution_lines": 5,
+        "loop_depth": 2,
+        "branches": 0,
+        "algorithm_weight": 60
+      },
+      "difficulty_band": 11
+    }
+  }
+}

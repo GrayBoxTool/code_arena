@@ -22,7 +22,7 @@ def question(p, image_prefix="../../static"):
 
 def main():
     for name in ('questions','answers','hints','tests'):(ROOT/name).mkdir(parents=True,exist_ok=True)
-    book=['# Code Rumble 문제집 · 운영자용\n\n럼블 25문제와 결승 A/B 각 5문제입니다. 정답 코드와 힌트가 포함되어 있으므로 참가자에게 공개하지 마세요.']
+    book=['# Code Rumble 문제집 · 운영자용\n\n럼블 35문제와 결승 A/B 각 5문제입니다. 정답 코드와 힌트가 포함되어 있으므로 참가자에게 공개하지 마세요.']
     all_cases=[]
     for p in PROBLEMS:
         q=question(p)

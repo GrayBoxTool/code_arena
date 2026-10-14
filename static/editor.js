@@ -146,6 +146,7 @@
       const item=event.target.closest('[data-index]');
       if (item) accept(Number(item.dataset.index));
     });
+    textarea.rumbleRepaint=paint;
     paint();
   }
 

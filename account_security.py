@@ -154,6 +154,8 @@ def begin_registration(c, data, consent_version):
     username = validate_username(data.get("username"))
     email = validate_email(data.get("email"))
     password = validate_password(data.get("password"))
+    if data.get("password_confirm") != password:
+        raise ValueError("비밀번호와 비밀번호 확인이 일치하지 않습니다.")
     if data.get("consent") is not True or data.get("consent_version") != consent_version:
         raise ValueError("개인정보 수집·이용 동의가 필요합니다.")
     if c.execute("SELECT 1 FROM accounts WHERE username=? OR nickname=? OR email=?", (username, nickname, email)).fetchone():
@@ -197,11 +199,16 @@ def _check_challenge(c, row, code):
         raise ValueError("인증 코드가 올바르지 않습니다.")
 
 
-def begin_recovery(c, email, kind):
+def begin_recovery(c, email, kind, username=None):
     email = validate_email(email)
     if kind not in ("username", "password"):
         raise ValueError("계정 찾기 유형을 확인하세요.")
-    account = c.execute("SELECT id,username FROM accounts WHERE email=? AND email_verified=1", (email,)).fetchone()
+    account = c.execute("SELECT id,username,email FROM accounts WHERE email=? AND email_verified=1", (email,)).fetchone()
+    if kind == "password":
+        username = validate_username(username)
+        if not account or account["username"].lower() != username.lower():
+            raise ValueError("아이디와 가입 이메일이 일치하지 않습니다.")
+    if account: email = account["email"]
     purpose = "recover-" + kind
     if account:
         code = f"{secrets.randbelow(1_000_000):06d}"

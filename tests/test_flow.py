@@ -22,7 +22,7 @@ from server import rename_variable,erase_last_lines
 
 class ProblemsTest(unittest.TestCase):
     def test_all_reference_solutions(self):
-        self.assertEqual(len(PROBLEMS),35)
+        self.assertEqual(len(PROBLEMS),45)
         self.assertEqual(HINT_COST,{'type':50,'structure':150,'assist':300})
         for p in PROBLEMS:
             with self.subTest(id=p['id']):

@@ -34,7 +34,7 @@ class AccountLobbyTests(unittest.TestCase):
         return cur.lastrowid
 
     def test_registration_requires_consent_and_password_is_hashed(self):
-        data={"nickname":"홍길동","full_name":"홍길동","username":"hong01","email":"hong@example.com","password":"secret123","consent":False,"consent_version":"test-v1"}
+        data={"nickname":"홍길동","full_name":"홍길동","username":"hong01","email":"hong@example.com","password":"secret123","password_confirm":"secret123","consent":False,"consent_version":"test-v1"}
         with self.assertRaisesRegex(ValueError,"동의"):
             accounts.begin_registration(self.c,data,"test-v1")
         data["consent"]=True
